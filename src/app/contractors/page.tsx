@@ -5,6 +5,13 @@ import { useState } from "react";
 
 import { trpc } from "@/lib/trpc";
 
+const NEGATIVE_RATINGS = ["F", "D-", "D", "D+", "C-"];
+
+function ratingStamp(rating: string | null) {
+  if (rating === null) return "stamp-neutral";
+  return NEGATIVE_RATINGS.includes(rating) ? "stamp-open" : "stamp-closed";
+}
+
 export default function ContractorsPage() {
   const [name, setName] = useState("");
   const [projectType, setProjectType] = useState("");
@@ -18,58 +25,55 @@ export default function ContractorsPage() {
   });
 
   return (
-    <div className="p-6">
-      <h1 className="mb-4 text-xl font-semibold">Contractor View</h1>
-      <div className="mb-4 flex flex-wrap gap-3 text-sm">
+    <div className="mx-auto max-w-5xl px-6 py-10">
+      <p className="eyebrow mb-2">Contractor View</p>
+      <h1 className="mb-6 text-2xl font-semibold">Contractors</h1>
+
+      <div className="mb-6 flex flex-wrap items-center gap-3 text-sm">
         <input
-          placeholder="Filter by name"
+          placeholder="Name"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900"
+          className="border border-line bg-paper-raised px-3 py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-stamp-closed"
         />
         <input
-          placeholder="Filter by work type (roof, electrical...)"
+          placeholder="Work type (roof, electrical...)"
           value={projectType}
           onChange={(e) => setProjectType(e.target.value)}
-          className="rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900"
+          className="border border-line bg-paper-raised px-3 py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-stamp-closed"
         />
-        <label className="flex items-center gap-1">
+        <label className="flex items-center gap-2 text-ink-muted">
           <input type="checkbox" checked={onlyNegativeBbb} onChange={(e) => setOnlyNegativeBbb(e.target.checked)} />
           Negative BBB rating only
         </label>
       </div>
 
-      {isLoading && <p>Loading...</p>}
-      {isError && <p>Failed to load contractors.</p>}
+      {isLoading && <p className="text-ink-muted">Loading records...</p>}
+      {isError && <p className="text-stamp-open">Couldn&apos;t load contractors.</p>}
+
       {data !== undefined && (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-zinc-300 text-left dark:border-zinc-700">
-              <th className="py-1">Name</th>
-              <th>Permits</th>
-              <th>BBB rating</th>
-              <th>Complaints</th>
-              <th>Reviews</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.map((row) => (
-              <tr key={row.companyId} className="border-b border-zinc-100 dark:border-zinc-900">
-                <td className="py-1">
-                  <Link href={`/contractors/${row.companyId}`} className="text-blue-600 hover:underline dark:text-blue-400">
-                    {row.name ?? "Unknown"}
-                  </Link>
-                </td>
-                <td>{row.permitCount}</td>
-                <td>{row.bbbRating ?? "-"}</td>
-                <td>{row.complaintCount ?? "-"}</td>
-                <td>{row.reviewCount ?? "-"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="border-t border-line">
+          {data.map((row) => (
+            <Link
+              key={row.companyId}
+              href={`/contractors/${row.companyId}`}
+              className="ledger-row flex items-center justify-between gap-4 px-1 py-3 text-sm"
+            >
+              <div className="min-w-0">
+                <p className="truncate font-medium">{row.name ?? "Unknown"}</p>
+                <p className="eyebrow">
+                  {row.permitCount} permit{row.permitCount === 1 ? "" : "s"}
+                  {row.reviewCount !== null && ` · ${row.reviewCount} reviews`}
+                </p>
+              </div>
+              <span className={`stamp shrink-0 ${ratingStamp(row.bbbRating)}`}>
+                {row.bbbRating ?? "not rated"}
+              </span>
+            </Link>
+          ))}
+          {data.length === 0 && <p className="py-6 text-ink-muted">No contractors match these filters.</p>}
+        </div>
       )}
-      {data !== undefined && data.length === 0 && <p>No contractors match these filters.</p>}
     </div>
   );
 }

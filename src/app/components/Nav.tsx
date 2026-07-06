@@ -5,20 +5,28 @@ const links = [
   { href: "/tenants", label: "Tenants" },
   { href: "/businesses", label: "Businesses" },
   { href: "/contractors", label: "Contractors" },
-  { href: "/search", label: "Semantic Search" },
+  { href: "/search", label: "Search" },
 ];
 
 export function Nav() {
   return (
-    <nav className="flex gap-4 border-b border-zinc-200 px-6 py-3 text-sm dark:border-zinc-800">
-      <Link href="/" className="font-semibold">
-        Oracle
-      </Link>
-      {links.map((link) => (
-        <Link key={link.href} href={link.href} className="text-zinc-600 hover:text-black dark:text-zinc-400 dark:hover:text-white">
-          {link.label}
+    <header className="border-b border-line bg-paper-raised">
+      <div className="mx-auto flex max-w-5xl items-center gap-1 px-6">
+        <Link href="/" className="mr-4 py-3 font-display text-base font-semibold">
+          Oracle
         </Link>
-      ))}
-    </nav>
+        <nav className="flex gap-1 text-sm">
+          {links.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className="border-b-2 border-transparent px-3 py-3 text-ink-muted transition-colors hover:border-line hover:text-ink"
+            >
+              {link.label}
+            </Link>
+          ))}
+        </nav>
+      </div>
+    </header>
   );
 }

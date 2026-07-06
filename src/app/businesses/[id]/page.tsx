@@ -5,59 +5,75 @@ import { useParams } from "next/navigation";
 
 import { trpc } from "@/lib/trpc";
 
+function Section({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <p className="eyebrow mb-3 border-b border-line pb-2">{label}</p>
+      {children}
+    </section>
+  );
+}
+
 export default function BusinessDetailPage() {
   const params = useParams<{ id: string }>();
   const { data, isLoading, isError } = trpc.businesses.detail.useQuery({ businessRegistrationId: params.id });
 
-  if (isLoading) return <div className="p-6">Loading...</div>;
-  if (isError || data === undefined) return <div className="p-6">Failed to load business.</div>;
+  if (isLoading) return <div className="mx-auto max-w-3xl px-6 py-10 text-ink-muted">Loading record...</div>;
+  if (isError || data === undefined)
+    return <div className="mx-auto max-w-3xl px-6 py-10 text-stamp-open">Couldn&apos;t load this business.</div>;
 
   const { registration, addresses, parties, relatedProperties } = data;
 
   return (
-    <div className="space-y-6 p-6 text-sm">
-      <h1 className="text-xl font-semibold">{registration?.entityName ?? "Unknown business"}</h1>
-      <p className="text-zinc-600 dark:text-zinc-400">
-        Status: {registration?.status ?? "unknown"} &middot; Filing type: {registration?.filingType ?? "unknown"} &middot; Filed:{" "}
-        {registration?.filedDate ?? "unknown"}
-      </p>
+    <div className="mx-auto max-w-3xl space-y-8 px-6 py-10 text-sm">
+      <div className="fade-in border border-line bg-paper-raised p-5">
+        <p className="eyebrow mb-1">Business registration</p>
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="text-2xl font-semibold">{registration?.entityName ?? "Unknown business"}</h1>
+          <span className={`stamp shrink-0 ${registration?.status === "ACTIVE" ? "stamp-closed" : "stamp-neutral"}`}>
+            {registration?.status ?? "unknown"}
+          </span>
+        </div>
+        <p className="mt-1 text-ink-muted">
+          {registration?.filingType ?? "unknown filing type"} &middot; filed {registration?.filedDate ?? "unknown"}
+        </p>
+      </div>
 
-      <section>
-        <h2 className="mb-2 font-semibold">Registered addresses</h2>
-        <ul className="space-y-1">
+      <Section label="Registered addresses">
+        <ul className="space-y-2">
           {addresses.map((a, i) => (
-            <li key={i}>
-              [{a.addressRole}] {a.line1}, {a.city}, {a.state} {a.zip}
+            <li key={i} className="ledger-row px-1 py-2">
+              <span className="stamp stamp-neutral mr-2">{a.addressRole}</span>
+              {a.line1}, {a.city}, {a.state} {a.zip}
             </li>
           ))}
         </ul>
-      </section>
+      </Section>
 
-      <section>
-        <h2 className="mb-2 font-semibold">Ownership / officers</h2>
-        <ul className="space-y-1">
+      <Section label="Ownership / officers">
+        <ul className="space-y-2">
           {parties.map((p, i) => (
-            <li key={i}>
-              [{p.partyRole}] {p.name} {p.title !== null && `(${p.title})`}
+            <li key={i} className="ledger-row px-1 py-2">
+              <span className="stamp stamp-neutral mr-2">{p.partyRole}</span>
+              {p.name} {p.title !== null && `(${p.title})`}
             </li>
           ))}
         </ul>
-      </section>
+      </Section>
 
-      <section>
-        <h2 className="mb-2 font-semibold">Related properties</h2>
-        {relatedProperties.length === 0 && <p className="text-zinc-500">No occupied properties on file.</p>}
-        <ul className="space-y-1">
+      <Section label="Related properties">
+        {relatedProperties.length === 0 && <p className="text-ink-muted">No occupied properties on file.</p>}
+        <ul className="space-y-2">
           {relatedProperties.map((p) => (
-            <li key={p.propertyId}>
-              <Link href={`/properties/${p.propertyId}`} className="text-blue-600 hover:underline dark:text-blue-400">
+            <li key={p.propertyId} className="ledger-row flex items-center justify-between px-1 py-2">
+              <Link href={`/properties/${p.propertyId}`} className="hover:underline">
                 {p.unnormalizedAddress ?? "Unknown address"}
-              </Link>{" "}
-              — {p.occupancyStatus}
+              </Link>
+              <span className="stamp stamp-neutral">{p.occupancyStatus}</span>
             </li>
           ))}
         </ul>
-      </section>
+      </Section>
     </div>
   );
 }

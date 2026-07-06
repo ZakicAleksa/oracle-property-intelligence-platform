@@ -1,26 +1,129 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --paper: #e9edee;
+  --paper-raised: #f4f6f6;
+  --ink: #14202b;
+  --ink-muted: #5b6b72;
+  --line: #c3cdd1;
+  --stamp-open: #b4432a;
+  --stamp-open-tint: #f3e0da;
+  --stamp-closed: #2f6b4f;
+  --stamp-closed-tint: #dde9e2;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+:root[data-theme="dark"] {
+  --paper: #0e1417;
+  --paper-raised: #161d21;
+  --ink: #dce4e6;
+  --ink-muted: #8b9aa1;
+  --line: #263238;
+  --stamp-open: #e0663f;
+  --stamp-open-tint: #2a1a15;
+  --stamp-closed: #4c9973;
+  --stamp-closed-tint: #16241c;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  :root:not([data-theme="light"]) {
+    --paper: #0e1417;
+    --paper-raised: #161d21;
+    --ink: #dce4e6;
+    --ink-muted: #8b9aa1;
+    --line: #263238;
+    --stamp-open: #e0663f;
+    --stamp-open-tint: #2a1a15;
+    --stamp-closed: #4c9973;
+    --stamp-closed-tint: #16241c;
   }
 }
 
+@theme inline {
+  --color-paper: var(--paper);
+  --color-paper-raised: var(--paper-raised);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-line: var(--line);
+  --color-stamp-open: var(--stamp-open);
+  --color-stamp-open-tint: var(--stamp-open-tint);
+  --color-stamp-closed: var(--stamp-closed);
+  --color-stamp-closed-tint: var(--stamp-closed-tint);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-fraunces);
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-fraunces), Georgia, serif;
+  letter-spacing: -0.01em;
+}
+
+.eyebrow {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.6875rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.stamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.15em 0.5em;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  white-space: nowrap;
+}
+
+.stamp-open {
+  color: var(--stamp-open);
+  background: var(--stamp-open-tint);
+}
+
+.stamp-closed {
+  color: var(--stamp-closed);
+  background: var(--stamp-closed-tint);
+}
+
+.stamp-neutral {
+  color: var(--ink-muted);
+  background: var(--paper-raised);
+}
+
+.ledger-row {
+  border-bottom: 1px solid var(--line);
+}
+
+.ledger-row:hover {
+  background: var(--paper-raised);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fade-in {
+    animation: fade-in 0.4s ease-out both;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

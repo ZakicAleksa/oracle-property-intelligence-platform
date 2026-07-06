@@ -18,22 +18,24 @@ export default function PropertiesPage() {
   });
 
   return (
-    <div className="p-6">
-      <h1 className="mb-4 text-xl font-semibold">Property View</h1>
-      <div className="mb-4 flex flex-wrap gap-3 text-sm">
+    <div className="mx-auto max-w-5xl px-6 py-10">
+      <p className="eyebrow mb-2">Property View</p>
+      <h1 className="mb-6 text-2xl font-semibold">Properties</h1>
+
+      <div className="mb-6 flex flex-wrap items-center gap-3 text-sm">
         <input
-          placeholder="Filter by city"
+          placeholder="City"
           value={city}
           onChange={(e) => setCity(e.target.value)}
-          className="rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900"
+          className="border border-line bg-paper-raised px-3 py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-stamp-closed"
         />
         <input
-          placeholder="Filter by permit type (roof, electrical...)"
+          placeholder="Permit type (roof, electrical...)"
           value={permitType}
           onChange={(e) => setPermitType(e.target.value)}
-          className="rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900"
+          className="border border-line bg-paper-raised px-3 py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-stamp-closed"
         />
-        <label className="flex items-center gap-1">
+        <label className="flex items-center gap-2 text-ink-muted">
           <input
             type="checkbox"
             checked={onlyMultipleOpenPermits}
@@ -43,37 +45,31 @@ export default function PropertiesPage() {
         </label>
       </div>
 
-      {isLoading && <p>Loading...</p>}
-      {isError && <p>Failed to load properties.</p>}
+      {isLoading && <p className="text-ink-muted">Loading records...</p>}
+      {isError && <p className="text-stamp-open">Couldn&apos;t load properties.</p>}
+
       {data !== undefined && (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-zinc-300 text-left dark:border-zinc-700">
-              <th className="py-1">Address</th>
-              <th>City</th>
-              <th>Type</th>
-              <th>Open permits</th>
-              <th>Permit types</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.map((row) => (
-              <tr key={row.propertyId} className="border-b border-zinc-100 dark:border-zinc-900">
-                <td className="py-1">
-                  <Link href={`/properties/${row.propertyId}`} className="text-blue-600 hover:underline dark:text-blue-400">
-                    {row.unnormalizedAddress ?? "Unknown address"}
-                  </Link>
-                </td>
-                <td>{row.cityName ?? "-"}</td>
-                <td>{row.propertyType ?? "-"}</td>
-                <td>{row.openPermitCount}</td>
-                <td>{row.permitTypes.filter(Boolean).join(", ")}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="border-t border-line">
+          {data.map((row) => (
+            <Link
+              key={row.propertyId}
+              href={`/properties/${row.propertyId}`}
+              className="ledger-row flex items-center justify-between gap-4 px-1 py-3 text-sm"
+            >
+              <div className="min-w-0">
+                <p className="truncate font-medium">{row.unnormalizedAddress ?? "Unknown address"}</p>
+                <p className="eyebrow">
+                  {row.cityName ?? "unknown city"} &middot; {row.propertyType ?? "unknown type"}
+                </p>
+              </div>
+              <span className={`stamp shrink-0 ${Number(row.openPermitCount) > 0 ? "stamp-open" : "stamp-neutral"}`}>
+                {row.openPermitCount} open
+              </span>
+            </Link>
+          ))}
+          {data.length === 0 && <p className="py-6 text-ink-muted">No properties match these filters.</p>}
+        </div>
       )}
-      {data !== undefined && data.length === 0 && <p>No properties match these filters.</p>}
     </div>
   );
 }

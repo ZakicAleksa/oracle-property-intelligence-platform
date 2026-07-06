@@ -13,42 +13,40 @@ export default function BusinessesPage() {
   });
 
   return (
-    <div className="p-6">
-      <h1 className="mb-4 text-xl font-semibold">Business View</h1>
+    <div className="mx-auto max-w-5xl px-6 py-10">
+      <p className="eyebrow mb-2">Business View</p>
+      <h1 className="mb-6 text-2xl font-semibold">Businesses</h1>
+
       <input
-        placeholder="Filter by business name"
+        placeholder="Business name"
         value={name}
         onChange={(e) => setName(e.target.value)}
-        className="mb-4 rounded border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+        className="mb-6 border border-line bg-paper-raised px-3 py-1.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-stamp-closed"
       />
 
-      {isLoading && <p>Loading...</p>}
-      {isError && <p>Failed to load businesses.</p>}
+      {isLoading && <p className="text-ink-muted">Loading records...</p>}
+      {isError && <p className="text-stamp-open">Couldn&apos;t load businesses.</p>}
+
       {data !== undefined && (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-zinc-300 text-left dark:border-zinc-700">
-              <th className="py-1">Entity name</th>
-              <th>Status</th>
-              <th>Filing type</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.map((row) => (
-              <tr key={row.businessRegistrationId} className="border-b border-zinc-100 dark:border-zinc-900">
-                <td className="py-1">
-                  <Link href={`/businesses/${row.businessRegistrationId}`} className="text-blue-600 hover:underline dark:text-blue-400">
-                    {row.entityName ?? "Unknown"}
-                  </Link>
-                </td>
-                <td>{row.status ?? "-"}</td>
-                <td>{row.filingType ?? "-"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="border-t border-line">
+          {data.map((row) => (
+            <Link
+              key={row.businessRegistrationId}
+              href={`/businesses/${row.businessRegistrationId}`}
+              className="ledger-row flex items-center justify-between gap-4 px-1 py-3 text-sm"
+            >
+              <div className="min-w-0">
+                <p className="truncate font-medium">{row.entityName ?? "Unknown"}</p>
+                <p className="eyebrow">{row.filingType ?? "unknown filing type"}</p>
+              </div>
+              <span className={`stamp shrink-0 ${row.status === "ACTIVE" ? "stamp-closed" : "stamp-neutral"}`}>
+                {row.status ?? "unknown"}
+              </span>
+            </Link>
+          ))}
+          {data.length === 0 && <p className="py-6 text-ink-muted">No businesses match this filter.</p>}
+        </div>
       )}
-      {data !== undefined && data.length === 0 && <p>No businesses match this filter.</p>}
     </div>
   );
 }
