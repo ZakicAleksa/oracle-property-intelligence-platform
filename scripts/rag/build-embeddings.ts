@@ -10,8 +10,15 @@ import { eq, inArray, sql } from "drizzle-orm";
 
 import { db, schema } from "../ingest/db.js";
 
-const { properties, addresses, propertyImprovements, companies, businessReputationProfiles, entityEmbeddings } =
-  schema;
+const {
+  properties,
+  addresses,
+  propertyImprovements,
+  companies,
+  businessReputationProfiles,
+  businessReputationComplaints,
+  entityEmbeddings,
+} = schema;
 
 const EMBEDDING_MODEL = "openai/text-embedding-3-small";
 const SOURCE_SYSTEM = "rag_index";
@@ -150,6 +157,17 @@ async function buildContractorSummaries(): Promise<void> {
     .from(businessReputationProfiles)
     .where(sql`${businessReputationProfiles.companyId} IS NOT NULL`);
 
+  // Oracle's own complaintCount summary field is frequently null even when
+  // real complaint records were scraped -- count the actual rows we loaded.
+  const realComplaintCounts = await db
+    .select({
+      businessReputationProfileId: businessReputationComplaints.businessReputationProfileId,
+      count: sql<number>`count(*)`,
+    })
+    .from(businessReputationComplaints)
+    .groupBy(businessReputationComplaints.businessReputationProfileId);
+  const complaintCountByProfileId = new Map(realComplaintCounts.map((r) => [r.businessReputationProfileId, r.count]));
+
   const companyIds = new Set<string>([
     ...permitRows.map((r) => r.companyId!),
     ...bbbRows.map((r) => r.companyId!),
@@ -189,9 +207,10 @@ async function buildContractorSummaries(): Promise<void> {
             .map((p) => p.projectDescription ?? p.improvementType ?? "renovation")
             .join("; ")}.`
         : "No permit history on file.";
+    const realComplaintCount = bbb !== undefined ? (complaintCountByProfileId.get(bbb.businessReputationProfileId) ?? 0) : 0;
     const bbbSummary =
       bbb !== undefined
-        ? `BBB rating: ${bbb.bbbRating ?? "not rated"}, ${bbb.reviewCount ?? 0} reviews, ${bbb.complaintCount ?? 0} complaints.`
+        ? `BBB rating: ${bbb.bbbRating ?? "not rated"}, ${bbb.reviewCount ?? 0} reviews, ${realComplaintCount} complaints.`
         : "No BBB profile on file.";
 
     summaries.push({

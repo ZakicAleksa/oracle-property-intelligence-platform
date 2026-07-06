@@ -39,6 +39,18 @@ export const contractorsRouter = router({
         .groupBy(propertyImprovements.contractorCompanyId)
         .as("permit_counts");
 
+      // Oracle's own businessReputationProfiles.complaintCount summary field
+      // is frequently null even when real complaint records were scraped --
+      // count the actual rows we loaded instead of trusting that field.
+      const complaintCounts = db
+        .select({
+          businessReputationProfileId: businessReputationComplaints.businessReputationProfileId,
+          complaintCount: sql<number>`count(*)`.as("complaint_count"),
+        })
+        .from(businessReputationComplaints)
+        .groupBy(businessReputationComplaints.businessReputationProfileId)
+        .as("complaint_counts");
+
       const rows = await db
         .select({
           companyId: companies.companyId,
@@ -46,12 +58,16 @@ export const contractorsRouter = router({
           permitCount: permitCounts.permitCount,
           permitTypes: permitCounts.types,
           bbbRating: businessReputationProfiles.bbbRating,
-          complaintCount: businessReputationProfiles.complaintCount,
+          complaintCount: sql<number>`coalesce(${complaintCounts.complaintCount}, 0)`,
           reviewCount: businessReputationProfiles.reviewCount,
         })
         .from(companies)
         .leftJoin(permitCounts, eq(permitCounts.companyId, companies.companyId))
         .leftJoin(businessReputationProfiles, eq(businessReputationProfiles.companyId, companies.companyId))
+        .leftJoin(
+          complaintCounts,
+          eq(complaintCounts.businessReputationProfileId, businessReputationProfiles.businessReputationProfileId),
+        )
         .where(
           and(
             input.name !== undefined && input.name.length > 0 ? ilike(companies.name, `%${input.name}%`) : undefined,
@@ -126,7 +142,7 @@ export const contractorsRouter = router({
           .where(eq(businessReputationReviews.businessReputationProfileId, bbbProfile.businessReputationProfileId))
       : [];
 
-    const complaints = bbbProfile
+    const complaintRows = bbbProfile
       ? await db
           .select({
             complaintDate: businessReputationComplaints.complaintDate,
@@ -151,6 +167,12 @@ export const contractorsRouter = router({
       .from(projects)
       .where(eq(projects.contractorCompanyId, input.companyId));
 
-    return { company, permits, bbbProfile, reviews, complaints, projects: projectList };
+    // Oracle's own complaintCount summary field is frequently null even when
+    // real complaint records were scraped -- report the actual row count
+    // from the complaints we loaded instead.
+    const bbbProfileWithRealCounts =
+      bbbProfile !== undefined ? { ...bbbProfile, complaintCount: complaintRows.length } : bbbProfile;
+
+    return { company, permits, bbbProfile: bbbProfileWithRealCounts, reviews, complaints: complaintRows, projects: projectList };
   }),
 });
