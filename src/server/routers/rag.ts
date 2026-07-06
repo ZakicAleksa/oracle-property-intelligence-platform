@@ -62,7 +62,7 @@ function extractKeywordTerms(question: string): string[] {
 const tools = {
   findPropertiesWithMultipleOpenPermits: tool({
     description:
-      "Finds real properties that currently have more than one open (active) permit. Use this for questions about properties with multiple/several open permits, not vector search, since that requires counting.",
+      "Finds real properties that currently have MORE THAN ONE open permit, of ANY type. Only use this when the question is about a count of open permits in general (e.g. \"multiple open permits\", \"several open permits\"). Do NOT use this for questions about a specific permit type/category like roofing, electrical, or plumbing -- use findPropertiesWithOpenPermitsByType for those instead, even if the word \"multiple\" doesn't appear.",
     inputSchema: z.object({ limit: z.number().min(1).max(20).default(10) }),
     execute: async ({ limit }) => {
       const openPermitCounts = db
@@ -88,6 +88,50 @@ const tools = {
         .leftJoin(addresses, eq(properties.addressId, addresses.addressId))
         .where(gt(openPermitCounts.openCount, 1))
         .orderBy(desc(openPermitCounts.openCount))
+        .limit(limit);
+
+      return rows;
+    },
+  }),
+  findPropertiesWithOpenPermitsByType: tool({
+    description:
+      "Finds real properties with at least one CURRENTLY OPEN permit matching a specific type/category, such as roofing, electrical, plumbing, HVAC, or concrete. Use this whenever the question names a specific permit type/category, e.g. \"open roofing permits\", \"open electrical permits\" -- do NOT use findPropertiesWithMultipleOpenPermits for these, since that tool ignores permit type entirely and would silently return the wrong (mislabeled) properties.",
+    inputSchema: z.object({
+      permitType: z
+        .string()
+        .describe('The permit type/category to filter by, e.g. "roof", "electrical", "plumbing", "concrete", "hvac".'),
+      limit: z.number().min(1).max(20).default(10),
+    }),
+    execute: async ({ permitType, limit }) => {
+      const likePattern = `%${permitType}%`;
+      const openPermitTypes = db
+        .select({
+          propertyId: propertyImprovements.propertyId,
+          // Count of open permits matching the requested type specifically,
+          // not the property's overall open-permit count -- otherwise the
+          // reported number silently answers a different question than the
+          // one asked ("how many are open" vs "how many roofing ones are
+          // open").
+          matchingOpenCount: sql<number>`count(*) filter (where ${propertyImprovements.improvementStatus} = 'open' and ${propertyImprovements.improvementType} ilike ${likePattern})`.as(
+            "matching_open_count",
+          ),
+        })
+        .from(propertyImprovements)
+        .groupBy(propertyImprovements.propertyId)
+        .as("open_permit_types");
+
+      const rows = await db
+        .select({
+          propertyId: properties.propertyId,
+          unnormalizedAddress: addresses.unnormalizedAddress,
+          cityName: addresses.cityName,
+          matchingOpenPermitCount: openPermitTypes.matchingOpenCount,
+        })
+        .from(properties)
+        .innerJoin(openPermitTypes, eq(openPermitTypes.propertyId, properties.propertyId))
+        .leftJoin(addresses, eq(properties.addressId, addresses.addressId))
+        .where(gt(openPermitTypes.matchingOpenCount, 0))
+        .orderBy(desc(openPermitTypes.matchingOpenCount))
         .limit(limit);
 
       return rows;
@@ -183,15 +227,20 @@ export const ragRouter = router({
         tools,
         stopWhen: stepCountIs(3),
         system:
-          "You answer questions about Lee County property, permit, contractor, and business data. For questions asking to count or filter entities by a condition (e.g. \"properties with multiple open permits\", \"contractors with negative BBB ratings\"), use the available tools to get real, accurate results rather than the numbered context below, which only reflects semantic similarity, not exact counts. For all other questions, answer using ONLY the numbered context provided. Cite sources inline using their bracket number, e.g. [1]. If neither the context nor a tool answers the question, say so plainly.",
+          "You answer questions about Lee County property, permit, contractor, and business data. For questions asking to count or filter entities by a condition (e.g. \"properties with multiple open permits\", \"open roofing permits\", \"contractors with negative BBB ratings\"), use the available tools to get real, accurate results rather than the numbered context below, which only reflects semantic similarity, not exact counts or types. Read each tool's description carefully and pick the one that actually matches the condition asked about -- a question naming a specific permit type/category must use findPropertiesWithOpenPermitsByType, never findPropertiesWithMultipleOpenPermits, even if it doesn't literally say \"multiple\". Never relabel one tool's results as answering a different condition than what it actually filtered on. For all other questions, answer using ONLY the numbered context provided. Cite sources inline using their bracket number, e.g. [1]. If neither the context nor a tool answers the question, say so plainly.",
         prompt: `Context:\n${context}\n\nQuestion: ${input.question}`,
       });
 
+      const TOOL_ENTITY_TYPES: Record<string, "property" | "contractor"> = {
+        findPropertiesWithMultipleOpenPermits: "property",
+        findPropertiesWithOpenPermitsByType: "property",
+        findContractorsWithNegativeBbbRating: "contractor",
+      };
       const toolCitations = result.toolResults.flatMap((toolResult, stepIndex) => {
         const rows = Array.isArray(toolResult.output) ? toolResult.output : [];
         return rows.map((row: { propertyId?: string; companyId?: string }, rowIndex: number) => ({
           index: matches.length + stepIndex * 100 + rowIndex + 1,
-          entityType: toolResult.toolName === "findPropertiesWithMultipleOpenPermits" ? "property" : "contractor",
+          entityType: TOOL_ENTITY_TYPES[toolResult.toolName] ?? "property",
           entityId: row.propertyId ?? row.companyId ?? "unknown",
           sourceSystem: "structured_query",
           sourceRecordKey: toolResult.toolName,
