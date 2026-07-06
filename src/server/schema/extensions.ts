@@ -10,6 +10,7 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  vector,
 } from "drizzle-orm/pg-core";
 
 import { companies } from "../elephant-query-db/schema/core";
@@ -169,5 +170,35 @@ export const publicRecords = pgTable(
       table.sourceSystem,
       table.sourceRecordKey,
     ),
+  ],
+);
+
+export const entityTypeValues = ["property", "contractor", "business"] as const;
+export type EntityType = (typeof entityTypeValues)[number];
+
+/**
+ * Phase 4 RAG index: one row per entity summary embedded for semantic
+ * retrieval. `entityId` points at the summarized row's own primary key
+ * (properties.propertyId or companies.companyId) — kept as text rather than
+ * a typed FK since it varies by entityType. 1536 dimensions matches
+ * OpenAI's text-embedding-3-small, used via the Vercel AI Gateway.
+ */
+export const entityEmbeddings = pgTable(
+  "entity_embeddings",
+  {
+    entityEmbeddingId: uuid("entity_embedding_id").primaryKey().defaultRandom(),
+    entityType: text("entity_type").$type<EntityType>().notNull(),
+    entityId: text("entity_id").notNull(),
+    content: text("content").notNull(),
+    embedding: vector("embedding", { dimensions: 1536 }).notNull(),
+    ...sourceMetadataColumns(),
+    createdAt: createdAtColumn(),
+  },
+  (table) => [
+    uniqueIndex("entity_embeddings_source_record_idx").on(
+      table.sourceSystem,
+      table.sourceRecordKey,
+    ),
+    index("entity_embeddings_entity_idx").on(table.entityType, table.entityId),
   ],
 );
