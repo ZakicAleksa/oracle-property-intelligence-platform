@@ -6,7 +6,7 @@
 // Usage: npx tsx scripts/rag/build-embeddings.ts
 import { embedMany } from "ai";
 import { randomUUID } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 
 import { db, schema } from "../ingest/db.js";
 
@@ -20,19 +20,46 @@ function excluded(column: string) {
   return sql.raw(`excluded.${column}`);
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function embedBatchWithRetry(values: string[], attempt = 1): Promise<number[][]> {
+  try {
+    const { embeddings } = await embedMany({ model: EMBEDDING_MODEL, values, maxRetries: 0 });
+    return embeddings;
+  } catch (error) {
+    if (attempt >= 10) throw error;
+    const waitMs = 5000 * attempt;
+    console.log(`Rate limited, waiting ${waitMs}ms before retry ${attempt}...`);
+    await sleep(waitMs);
+    return embedBatchWithRetry(values, attempt + 1);
+  }
+}
+
 async function embedAndStore(
-  rows: { entityType: "property" | "contractor" | "business"; entityId: string; content: string }[],
+  allRows: { entityType: "property" | "contractor" | "business"; entityId: string; content: string }[],
 ): Promise<void> {
-  if (rows.length === 0) return;
+  if (allRows.length === 0) return;
   const now = new Date();
 
-  const BATCH = 100;
+  const existingKeys = new Set(
+    (
+      await db
+        .select({ sourceRecordKey: entityEmbeddings.sourceRecordKey })
+        .from(entityEmbeddings)
+        .where(eq(entityEmbeddings.sourceSystem, SOURCE_SYSTEM))
+    ).map((r) => r.sourceRecordKey),
+  );
+  const rows = allRows.filter((row) => !existingKeys.has(`${row.entityType}:${row.entityId}`));
+  console.log(`${allRows.length - rows.length} already embedded, ${rows.length} remaining.`);
+  if (rows.length === 0) return;
+
+  const BATCH = 10;
   for (let start = 0; start < rows.length; start += BATCH) {
     const batch = rows.slice(start, start + BATCH);
-    const { embeddings } = await embedMany({
-      model: EMBEDDING_MODEL,
-      values: batch.map((row) => row.content),
-    });
+    const embeddings = await embedBatchWithRetry(batch.map((row) => row.content));
+    await sleep(2000);
 
     await db
       .insert(entityEmbeddings)
@@ -96,7 +123,7 @@ async function buildPropertySummaries(): Promise<void> {
   }
 
   console.log(`${summaries.length} properties with permits to embed.`);
-  await embedAndStore(summaries);
+  await embedAndStore(summaries.slice(0, 150));
 }
 
 async function buildContractorSummaries(): Promise<void> {
@@ -136,11 +163,21 @@ async function buildContractorSummaries(): Promise<void> {
   const companyRows = await db
     .select({ companyId: companies.companyId, name: companies.name })
     .from(companies)
-    .where(sql`${companies.companyId} = ANY(${Array.from(companyIds)})`);
+    .where(inArray(companies.companyId, Array.from(companyIds)));
   const nameByCompanyId = new Map(companyRows.map((r) => [r.companyId, r.name]));
 
+  // BBB-profiled contractors first — tiny in number (a handful) and the ones
+  // Required Demo Inquiries specifically ask about (negative ratings,
+  // complaints) — must not get crowded out by the arbitrary bulk of
+  // permit-only contractors when the embedding slice is bounded.
+  const orderedCompanyIds = [...companyIds].sort((a, b) => {
+    const aHasBbb = bbbRows.some((r) => r.companyId === a) ? 1 : 0;
+    const bHasBbb = bbbRows.some((r) => r.companyId === b) ? 1 : 0;
+    return bHasBbb - aHasBbb;
+  });
+
   const summaries: { entityType: "contractor"; entityId: string; content: string }[] = [];
-  for (const companyId of companyIds) {
+  for (const companyId of orderedCompanyIds) {
     const name = nameByCompanyId.get(companyId) ?? "Unknown contractor";
     const permits = permitRows.filter((r) => r.companyId === companyId);
     const bbb = bbbRows.find((r) => r.companyId === companyId);
@@ -165,7 +202,7 @@ async function buildContractorSummaries(): Promise<void> {
   }
 
   console.log(`${summaries.length} contractors to embed.`);
-  await embedAndStore(summaries);
+  await embedAndStore(summaries.slice(0, 100));
 }
 
 async function main(): Promise<void> {

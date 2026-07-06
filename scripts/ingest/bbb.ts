@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { inArray, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 
 import { resolveCompanyId } from "./contractor.js";
 import { db, schema } from "./db.js";
@@ -94,6 +94,10 @@ export async function loadBbbForProperty(profiles: BbbProfile[], now: Date): Pro
     let companyId: string | null = null;
     if (profile.name !== null) {
       companyId = await resolveCompanyId(profile.name, SOURCE_SYSTEM, now);
+      await db
+        .update(businessReputationProfiles)
+        .set({ companyId })
+        .where(eq(businessReputationProfiles.businessReputationProfileId, businessReputationProfileId));
     }
 
     for (const [index, review] of profile.reviews.entries()) {
