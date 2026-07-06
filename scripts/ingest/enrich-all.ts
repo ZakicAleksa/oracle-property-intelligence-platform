@@ -54,7 +54,7 @@ function parseArgs(): {
 async function processProperty(row: ParquetRow, now: Date): Promise<void> {
   const property = await fetchConsolidatedProperty(row.property_cid);
   await loadPermitsForProperty(row.property_id, property.permits, now);
-  await loadSunbizForProperty(property.sunbizTenants, now);
+  await loadSunbizForProperty(row.property_id, property.sunbizTenants, now);
   await loadBbbForProperty(property.bbbProfiles, now);
 }
 

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { inArray, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 
 import { resolveCompanyId } from "./contractor.js";
 import { db, schema } from "./db.js";
@@ -11,7 +11,13 @@ const {
   businessRegistrationParties,
   businessRegistrationAnnualReports,
   publicRecords,
+  ownerships,
+  tenants,
 } = schema;
+
+function normalizeOwnerName(text: string | null): string {
+  return (text ?? "").toUpperCase().replace(/[.,]/g, "").replace(/\s+/g, " ").trim();
+}
 
 const SOURCE_SYSTEM = "sunbiz";
 
@@ -26,18 +32,25 @@ function toDateOnly(value: unknown): string | null {
 }
 
 /**
- * Loads one property's sunbizTenants[] array into the adopted schema.
- * Batched per property, same principle as permits.ts: one multi-row INSERT
- * per child table rather than per-row sequential awaits.
+ * Loads one property's sunbizTenants[] array into the adopted schema, plus
+ * derives a `tenants` occupancy row for each — the property/business link is
+ * already known at fetch time (this data came from *this* property's own
+ * consolidated JSON), so there's no need to guess it later via address
+ * matching. Occupancy status compares the registrant's name against the
+ * property's ownership records.
  */
-export async function loadSunbizForProperty(tenants: SunbizTenant[], now: Date): Promise<void> {
-  if (tenants.length === 0) return;
+export async function loadSunbizForProperty(
+  propertyId: string,
+  sunbizTenants: SunbizTenant[],
+  now: Date,
+): Promise<void> {
+  if (sunbizTenants.length === 0) return;
 
   // documentNumber is Sunbiz's own natural key — dedupe defensively in case
   // the same registration appears twice in the raw array (seen live earlier).
   const uniqueTenants = [
     ...new Map(
-      tenants.filter((t) => t.documentNumber !== null).map((t) => [t.documentNumber, t]),
+      sunbizTenants.filter((t) => t.documentNumber !== null).map((t) => [t.documentNumber, t]),
     ).values(),
   ];
   if (uniqueTenants.length === 0) return;
@@ -84,6 +97,12 @@ export async function loadSunbizForProperty(tenants: SunbizTenant[], now: Date):
   const addressRows: (typeof businessRegistrationAddresses.$inferInsert)[] = [];
   const partyRows: (typeof businessRegistrationParties.$inferInsert)[] = [];
   const reportRows: (typeof businessRegistrationAnnualReports.$inferInsert)[] = [];
+  const tenantRows: (typeof tenants.$inferInsert)[] = [];
+
+  const ownerRows = await db
+    .select({ ownedBy: ownerships.ownedBy })
+    .from(ownerships)
+    .where(eq(ownerships.propertyId, propertyId));
 
   for (const tenant of uniqueTenants) {
     const documentNumber = tenant.documentNumber!;
@@ -91,7 +110,19 @@ export async function loadSunbizForProperty(tenants: SunbizTenant[], now: Date):
     if (businessRegistrationId === undefined) continue;
 
     if (tenant.entityName !== null) {
-      await resolveCompanyId(tenant.entityName, SOURCE_SYSTEM, now);
+      const companyId = await resolveCompanyId(tenant.entityName, SOURCE_SYSTEM, now);
+      const isOwnerOccupied = ownerRows.some(
+        (o) => o.ownedBy !== null && normalizeOwnerName(o.ownedBy) === normalizeOwnerName(tenant.entityName),
+      );
+      tenantRows.push({
+        tenantId: randomUUID(),
+        propertyId,
+        businessCompanyId: companyId,
+        occupancyStatus: isOwnerOccupied ? "owner_occupied" : "tenant",
+        sourceSystem: SOURCE_SYSTEM,
+        sourceRecordKey: `${propertyId}:${documentNumber}`,
+        loadedAt: now,
+      });
     }
 
     for (const [index, address] of tenant.addresses.entries()) {
@@ -165,6 +196,12 @@ export async function loadSunbizForProperty(tenants: SunbizTenant[], now: Date):
           businessRegistrationAnnualReports.sourceRecordKey,
         ],
       });
+  }
+  if (tenantRows.length > 0) {
+    await db
+      .insert(tenants)
+      .values(tenantRows)
+      .onConflictDoNothing({ target: [tenants.sourceSystem, tenants.sourceRecordKey] });
   }
 
   await db
