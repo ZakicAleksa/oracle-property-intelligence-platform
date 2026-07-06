@@ -1,4 +1,4 @@
-import { desc, eq, ilike, sql } from "drizzle-orm";
+import { and, eq, ilike, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db, schema } from "../db";
@@ -50,16 +50,25 @@ export const contractorsRouter = router({
           reviewCount: businessReputationProfiles.reviewCount,
         })
         .from(companies)
-        .innerJoin(permitCounts, eq(permitCounts.companyId, companies.companyId))
+        .leftJoin(permitCounts, eq(permitCounts.companyId, companies.companyId))
         .leftJoin(businessReputationProfiles, eq(businessReputationProfiles.companyId, companies.companyId))
         .where(
-          input.name !== undefined && input.name.length > 0 ? ilike(companies.name, `%${input.name}%`) : undefined,
+          and(
+            input.name !== undefined && input.name.length > 0 ? ilike(companies.name, `%${input.name}%`) : undefined,
+            // A contractor is only relevant here if it has permit history or a
+            // BBB profile — excludes bare Sunbiz-only company rows that never
+            // resolved to either signal.
+            sql`(${permitCounts.companyId} IS NOT NULL OR ${businessReputationProfiles.companyId} IS NOT NULL)`,
+          ),
         )
-        .orderBy(desc(permitCounts.permitCount))
-        .limit(input.limit);
+        .orderBy(sql`${permitCounts.permitCount} DESC NULLS LAST`);
 
       const filtered = rows.filter((r) => {
-        if (input.projectType !== undefined && !r.permitTypes.some((t) => t?.toLowerCase().includes(input.projectType!.toLowerCase()))) {
+        const permitTypes = r.permitTypes ?? [];
+        if (
+          input.projectType !== undefined &&
+          !permitTypes.some((t) => t?.toLowerCase().includes(input.projectType!.toLowerCase()))
+        ) {
           return false;
         }
         if (input.onlyNegativeBbb === true && !(r.bbbRating !== null && NEGATIVE_BBB_RATINGS.includes(r.bbbRating))) {
@@ -68,7 +77,7 @@ export const contractorsRouter = router({
         return true;
       });
 
-      return filtered;
+      return filtered.slice(0, input.limit);
     }),
 
   detail: publicProcedure.input(z.object({ companyId: z.string().uuid() })).query(async ({ input }) => {

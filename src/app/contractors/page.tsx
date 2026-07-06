@@ -62,7 +62,7 @@ export default function ContractorsPage() {
               <div className="min-w-0">
                 <p className="truncate font-medium">{row.name ?? "Unknown"}</p>
                 <p className="eyebrow">
-                  {row.permitCount} permit{row.permitCount === 1 ? "" : "s"}
+                  {row.permitCount ?? 0} permit{row.permitCount === 1 ? "" : "s"}
                   {row.reviewCount !== null && ` · ${row.reviewCount} reviews`}
                 </p>
               </div>
