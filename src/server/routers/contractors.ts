@@ -45,7 +45,7 @@ export const contractorsRouter = router({
       const complaintCounts = db
         .select({
           businessReputationProfileId: businessReputationComplaints.businessReputationProfileId,
-          complaintCount: sql<number>`count(*)`.as("complaint_count"),
+          realComplaintCount: sql<number>`count(*)`.as("real_complaint_count"),
         })
         .from(businessReputationComplaints)
         .groupBy(businessReputationComplaints.businessReputationProfileId)
@@ -58,7 +58,7 @@ export const contractorsRouter = router({
           permitCount: permitCounts.permitCount,
           permitTypes: permitCounts.types,
           bbbRating: businessReputationProfiles.bbbRating,
-          complaintCount: sql<number>`coalesce(${complaintCounts.complaintCount}, 0)`,
+          complaintCount: complaintCounts.realComplaintCount,
           reviewCount: businessReputationProfiles.reviewCount,
         })
         .from(companies)
