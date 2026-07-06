@@ -1,5 +1,5 @@
 import { embed, generateText } from "ai";
-import { cosineDistance, sql } from "drizzle-orm";
+import { cosineDistance, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db, schema } from "../db";
@@ -9,6 +9,41 @@ const { entityEmbeddings } = schema;
 
 const EMBEDDING_MODEL = "openai/text-embedding-3-small";
 const CHAT_MODEL = "openai/gpt-4o-mini";
+
+const STOPWORDS = new Set([
+  "The",
+  "What",
+  "Which",
+  "Show",
+  "Tell",
+  "About",
+  "With",
+  "Have",
+  "Their",
+  "This",
+  "That",
+  "There",
+  "Boulevard",
+  "Street",
+  "Avenue",
+]);
+
+/**
+ * Pure vector similarity under-ranks exact entity mentions when many
+ * candidates share similar templated phrasing (confirmed live: a question
+ * naming a specific property by address ranked that property's own
+ * embedding outside the top 10, behind semantically-similar-but-different
+ * properties). Extracts likely proper nouns/numbers (street numbers,
+ * capitalized names) from the question and keyword-matches them against
+ * content directly, so an exact address/name mention is found regardless
+ * of how it ranks by cosine similarity.
+ */
+function extractKeywordTerms(question: string): string[] {
+  const numbers = question.match(/\b\d{3,6}\b/g) ?? [];
+  const properNouns = question.match(/\b[A-Z][a-zA-Z]{2,}\b/g) ?? [];
+  const terms = [...numbers, ...properNouns.filter((word) => !STOPWORDS.has(word))];
+  return [...new Set(terms)];
+}
 
 export const ragRouter = router({
   search: publicProcedure
@@ -20,18 +55,48 @@ export const ragRouter = router({
       });
 
       const similarity = sql<number>`1 - (${cosineDistance(entityEmbeddings.embedding, embedding)})`;
-      const matches = await db
-        .select({
-          entityType: entityEmbeddings.entityType,
-          entityId: entityEmbeddings.entityId,
-          content: entityEmbeddings.content,
-          sourceSystem: entityEmbeddings.sourceSystem,
-          sourceRecordKey: entityEmbeddings.sourceRecordKey,
-          similarity,
-        })
+      const vectorMatches = await db
+        .select({ entityId: entityEmbeddings.entityId, entityType: entityEmbeddings.entityType })
         .from(entityEmbeddings)
         .orderBy(sql`${similarity} desc`)
         .limit(8);
+
+      const keywordTerms = extractKeywordTerms(input.question);
+      const keywordMatches =
+        keywordTerms.length > 0
+          ? await db
+              .select({ entityId: entityEmbeddings.entityId, entityType: entityEmbeddings.entityType })
+              .from(entityEmbeddings)
+              .where(or(...keywordTerms.map((term) => sql`${entityEmbeddings.content} ILIKE ${"%" + term + "%"}`)))
+              .limit(8)
+          : [];
+
+      const uniqueIds = [
+        ...new Map(
+          [...vectorMatches, ...keywordMatches].map((m) => [`${m.entityType}:${m.entityId}`, m]),
+        ).values(),
+      ];
+
+      const matches =
+        uniqueIds.length > 0
+          ? await db
+              .select({
+                entityType: entityEmbeddings.entityType,
+                entityId: entityEmbeddings.entityId,
+                content: entityEmbeddings.content,
+                sourceSystem: entityEmbeddings.sourceSystem,
+                sourceRecordKey: entityEmbeddings.sourceRecordKey,
+                similarity,
+              })
+              .from(entityEmbeddings)
+              .where(
+                inArray(
+                  entityEmbeddings.entityId,
+                  uniqueIds.map((m) => m.entityId),
+                ),
+              )
+              .orderBy(sql`${similarity} desc`)
+          : [];
 
       if (matches.length === 0) {
         return {

@@ -78,13 +78,13 @@ async function embedAndStore(
   );
   if (rows.length === 0) return;
 
-  const BATCH = 10;
+  const BATCH = 50;
   for (let start = 0; start < rows.length; start += BATCH) {
     const batch = rows.slice(start, start + BATCH);
     const embeddings = await embedBatchWithRetry(
       batch.map((row) => row.content),
     );
-    await sleep(2000);
+    await sleep(500);
 
     await db
       .insert(entityEmbeddings)
@@ -150,21 +150,37 @@ async function buildPropertySummaries(): Promise<void> {
     entityType: "property";
     entityId: string;
     content: string;
+    openCount: number;
+    totalCount: number;
   }[] = [];
   for (const [propertyId, permitRows] of byProperty) {
     const first = permitRows[0]!;
+    const openCount = permitRows.filter((r) => r.improvementStatus === "open").length;
+    // Cap both permit count and per-line length -- a property with 100+
+    // permits (exactly the "most active" ones we now prioritize) can produce
+    // a text blob past the embedding model's 8192-token input limit
+    // otherwise, confirmed live on our own flagship demo property.
     const permitLines = permitRows
+      .slice(0, 20)
       .map(
         (r) =>
-          `Permit ${r.permitNumber ?? "unknown"}: ${r.projectDescription ?? r.improvementType ?? "no description"} (status: ${r.improvementStatus ?? "unknown"})`,
+          `Permit ${r.permitNumber ?? "unknown"}: ${(r.projectDescription ?? r.improvementType ?? "no description").slice(0, 150)} (status: ${r.improvementStatus ?? "unknown"})`,
       )
       .join("; ");
-    const content = `Property at ${first.unnormalizedAddress ?? "unknown address"}, ${first.cityName ?? "unknown city"} (${first.propertyType ?? "unknown type"}). Permit history: ${permitLines}.`;
-    summaries.push({ entityType: "property", entityId: propertyId, content });
+    // State the open-permit count explicitly so semantic search can answer
+    // "which properties have multiple open permits" from this text directly,
+    // not just infer it from listing every permit's status.
+    const content = `Property at ${first.unnormalizedAddress ?? "unknown address"}, ${first.cityName ?? "unknown city"} (${first.propertyType ?? "unknown type"}). ${permitRows.length} total permits, ${openCount} currently open. Permit history (first 20): ${permitLines}.`.slice(0, 6000);
+    summaries.push({ entityType: "property", entityId: propertyId, content, openCount, totalCount: permitRows.length });
   }
 
+  // Most active properties first (by open permits, then total permits) --
+  // guarantees flagship/high-signal properties land in a bounded embedding
+  // slice rather than whatever order they happened to appear in the source.
+  summaries.sort((a, b) => b.openCount - a.openCount || b.totalCount - a.totalCount);
+
   console.log(`${summaries.length} properties with permits to embed.`);
-  await embedAndStore(summaries.slice(0, 150));
+  await embedAndStore(summaries.slice(0, 500));
 }
 
 async function buildContractorSummaries(): Promise<void> {
@@ -339,7 +355,7 @@ async function buildContractorSummaries(): Promise<void> {
   }
 
   console.log(`${summaries.length} contractors to embed.`);
-  await embedAndStore(summaries.slice(0, 100));
+  await embedAndStore(summaries.slice(0, 300));
 }
 
 async function main(): Promise<void> {
