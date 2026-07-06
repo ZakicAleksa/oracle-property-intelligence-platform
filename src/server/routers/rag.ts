@@ -12,6 +12,8 @@ const {
   propertyImprovements,
   companies,
   businessReputationProfiles,
+  projects,
+  tenants,
 } = schema;
 
 const EMBEDDING_MODEL = "openai/text-embedding-3-small";
@@ -157,6 +159,116 @@ const tools = {
       return rows;
     },
   }),
+  findMostActiveContractorsByProjectCount: tool({
+    description:
+      "Finds the real contractors with the most derived renovation projects (a project groups related permits on the same property+contractor). Use this for \"most active contractors\" / \"by project count\" questions, not vector search, since that requires a real count across all contractors.",
+    inputSchema: z.object({ limit: z.number().min(1).max(20).default(10) }),
+    execute: async ({ limit }) => {
+      const rows = await db
+        .select({
+          companyId: companies.companyId,
+          name: companies.name,
+          projectCount: sql<number>`count(*)`,
+        })
+        .from(projects)
+        .innerJoin(companies, eq(companies.companyId, projects.contractorCompanyId))
+        .groupBy(companies.companyId, companies.name)
+        .orderBy(desc(sql`count(*)`))
+        .limit(limit);
+
+      return rows;
+    },
+  }),
+  findBusinessesAcrossMultipleProperties: tool({
+    description:
+      "Finds real businesses/tenants that occupy more than one property. Use this for questions about businesses or tenants operating across multiple properties/locations, not vector search, since that requires counting distinct properties per business.",
+    inputSchema: z.object({ limit: z.number().min(1).max(20).default(10) }),
+    execute: async ({ limit }) => {
+      const rows = await db
+        .select({
+          companyId: companies.companyId,
+          name: companies.name,
+          propertyCount: sql<number>`count(distinct ${tenants.propertyId})`,
+        })
+        .from(tenants)
+        .innerJoin(companies, eq(companies.companyId, tenants.businessCompanyId))
+        .groupBy(companies.companyId, companies.name)
+        .having(sql`count(distinct ${tenants.propertyId}) > 1`)
+        .orderBy(desc(sql`count(distinct ${tenants.propertyId})`))
+        .limit(limit);
+
+      return rows;
+    },
+  }),
+  findOwnersWithMultipleProperties: tool({
+    description:
+      "Finds real property owners (by name) who are recorded as owning more than one property. Use this for questions about owners associated with multiple properties, not vector search, since that requires counting distinct properties per owner name.",
+    inputSchema: z.object({ limit: z.number().min(1).max(20).default(10) }),
+    execute: async ({ limit }) => {
+      const { ownerships } = schema;
+      const rows = await db
+        .select({
+          ownedBy: ownerships.ownedBy,
+          propertyCount: sql<number>`count(distinct ${ownerships.propertyId})`,
+          samplePropertyId: sql<string>`min(${ownerships.propertyId}::text)`,
+        })
+        .from(ownerships)
+        .where(sql`${ownerships.ownedBy} IS NOT NULL`)
+        .groupBy(ownerships.ownedBy)
+        .having(sql`count(distinct ${ownerships.propertyId}) > 1`)
+        .orderBy(desc(sql`count(distinct ${ownerships.propertyId})`))
+        .limit(limit);
+
+      return rows;
+    },
+  }),
+  findContractorsByWorkType: tool({
+    description:
+      "Finds real contractors who have performed a specific type/category of work (e.g. roofing, electrical, plumbing), based on their permit history. Use this for questions like \"contractors performing roofing work\" -- do NOT use this for questions about properties, only for questions asking which contractors do a kind of work.",
+    inputSchema: z.object({
+      workType: z.string().describe('The type of work to filter by, e.g. "roof", "electrical", "plumbing".'),
+      limit: z.number().min(1).max(20).default(10),
+    }),
+    execute: async ({ workType, limit }) => {
+      const likePattern = `%${workType}%`;
+      const rows = await db
+        .select({
+          companyId: companies.companyId,
+          name: companies.name,
+          matchingPermitCount: sql<number>`count(*)`,
+        })
+        .from(propertyImprovements)
+        .innerJoin(companies, eq(companies.companyId, propertyImprovements.contractorCompanyId))
+        .where(sql`${propertyImprovements.improvementType} ilike ${likePattern}`)
+        .groupBy(companies.companyId, companies.name)
+        .orderBy(desc(sql`count(*)`))
+        .limit(limit);
+
+      return rows;
+    },
+  }),
+  findProjectsByNegativeBbbContractors: tool({
+    description:
+      "Finds real renovation projects completed by contractors who have a negative BBB rating or complaint history. Use this for questions correlating contractor BBB standing with completed project/renovation work, not vector search, since that requires joining BBB ratings to the projects table.",
+    inputSchema: z.object({ limit: z.number().min(1).max(20).default(10) }),
+    execute: async ({ limit }) => {
+      const rows = await db
+        .select({
+          companyId: companies.companyId,
+          contractorName: companies.name,
+          bbbRating: businessReputationProfiles.bbbRating,
+          propertyId: projects.propertyId,
+          projectType: projects.projectType,
+        })
+        .from(projects)
+        .innerJoin(companies, eq(companies.companyId, projects.contractorCompanyId))
+        .innerJoin(businessReputationProfiles, eq(businessReputationProfiles.companyId, companies.companyId))
+        .where(inArray(businessReputationProfiles.bbbRating, NEGATIVE_BBB_RATINGS))
+        .limit(limit);
+
+      return rows;
+    },
+  }),
 };
 
 export const ragRouter = router({
@@ -227,7 +339,7 @@ export const ragRouter = router({
         tools,
         stopWhen: stepCountIs(3),
         system:
-          "You answer questions about Lee County property, permit, contractor, and business data. For questions asking to count or filter entities by a condition (e.g. \"properties with multiple open permits\", \"open roofing permits\", \"contractors with negative BBB ratings\"), use the available tools to get real, accurate results rather than the numbered context below, which only reflects semantic similarity, not exact counts or types. Read each tool's description carefully and pick the one that actually matches the condition asked about -- a question naming a specific permit type/category must use findPropertiesWithOpenPermitsByType, never findPropertiesWithMultipleOpenPermits, even if it doesn't literally say \"multiple\". Never relabel one tool's results as answering a different condition than what it actually filtered on. For all other questions, answer using ONLY the numbered context provided. Cite sources inline using their bracket number, e.g. [1]. If neither the context nor a tool answers the question, say so plainly.",
+          "You answer questions about Lee County property, permit, contractor, and business data. For questions asking to count, rank, or filter entities by a condition (e.g. \"properties with multiple open permits\", \"open roofing permits\", \"contractors with negative BBB ratings\", \"most active contractors\", \"owners with multiple properties\", \"businesses across multiple properties\", \"projects by contractors with negative BBB ratings\"), use the available tools to get real, accurate results rather than the numbered context below, which only reflects semantic similarity, not exact counts, types, or rankings. Read each tool's description carefully and pick the one that actually matches the condition asked about -- a question naming a specific permit type/category or work type must use the type-specific tool, never the generic one, even if it doesn't literally say \"multiple\". Never relabel one tool's results as answering a different condition than what it actually filtered on. For all other questions, answer using ONLY the numbered context provided. Cite sources inline using their bracket number, e.g. [1]. If neither the context nor a tool answers the question, say so plainly.",
         prompt: `Context:\n${context}\n\nQuestion: ${input.question}`,
       });
 
@@ -235,17 +347,25 @@ export const ragRouter = router({
         findPropertiesWithMultipleOpenPermits: "property",
         findPropertiesWithOpenPermitsByType: "property",
         findContractorsWithNegativeBbbRating: "contractor",
+        findMostActiveContractorsByProjectCount: "contractor",
+        findBusinessesAcrossMultipleProperties: "contractor",
+        findOwnersWithMultipleProperties: "property",
+        findContractorsByWorkType: "contractor",
+        findProjectsByNegativeBbbContractors: "contractor",
       };
-      const toolCitations = result.toolResults.flatMap((toolResult, stepIndex) => {
+      let nextCitationIndex = matches.length + 1;
+      const toolCitations = result.toolResults.flatMap((toolResult) => {
         const rows = Array.isArray(toolResult.output) ? toolResult.output : [];
-        return rows.map((row: { propertyId?: string; companyId?: string }, rowIndex: number) => ({
-          index: matches.length + stepIndex * 100 + rowIndex + 1,
-          entityType: TOOL_ENTITY_TYPES[toolResult.toolName] ?? "property",
-          entityId: row.propertyId ?? row.companyId ?? "unknown",
-          sourceSystem: "structured_query",
-          sourceRecordKey: toolResult.toolName,
-          similarity: null,
-        }));
+        return rows.map(
+          (row: { propertyId?: string; companyId?: string; samplePropertyId?: string; ownedBy?: string }) => ({
+            index: nextCitationIndex++,
+            entityType: TOOL_ENTITY_TYPES[toolResult.toolName] ?? "property",
+            entityId: row.propertyId ?? row.companyId ?? row.samplePropertyId ?? row.ownedBy ?? "unknown",
+            sourceSystem: "structured_query",
+            sourceRecordKey: toolResult.toolName,
+            similarity: null,
+          }),
+        );
       });
 
       return {
