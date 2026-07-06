@@ -90,7 +90,16 @@ export const contractorsRouter = router({
             sql`(${permitCounts.companyId} IS NOT NULL OR ${businessReputationProfiles.companyId} IS NOT NULL)`,
           ),
         )
-        .orderBy(sql`${permitCounts.permitCount} DESC NULLS LAST`);
+        // BBB-linked contractors first (they're almost all permit-count NULL
+        // or low, since BBB and permit identity resolution don't always land
+        // on the same company row) -- otherwise every one of them sorts
+        // below the ~2,500 permit-only contractors and never appears in an
+        // unfiltered browse of the Contractor View, even though "Display
+        // contractor BBB ratings" is an unconditional Acceptance Criterion,
+        // not something gated behind the negative-rating filter.
+        .orderBy(
+          sql`(CASE WHEN ${businessReputationProfiles.companyId} IS NOT NULL THEN 0 ELSE 1 END), ${permitCounts.permitCount} DESC NULLS LAST`,
+        );
 
       const filtered = rows.filter((r) => {
         const permitTypes = r.permitTypes ?? [];
