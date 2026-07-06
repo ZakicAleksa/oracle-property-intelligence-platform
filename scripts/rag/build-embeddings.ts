@@ -16,6 +16,7 @@ const {
   propertyImprovements,
   companies,
   businessReputationProfiles,
+  businessReputationReviews,
   businessReputationComplaints,
   entityEmbeddings,
 } = schema;
@@ -168,6 +169,41 @@ async function buildContractorSummaries(): Promise<void> {
     .groupBy(businessReputationComplaints.businessReputationProfileId);
   const complaintCountByProfileId = new Map(realComplaintCounts.map((r) => [r.businessReputationProfileId, r.count]));
 
+  // Real review/complaint text so semantic search can answer about substance
+  // ("what do reviews say"), not just counts.
+  const allReviews = await db
+    .select({
+      businessReputationProfileId: businessReputationReviews.businessReputationProfileId,
+      reviewRating: businessReputationReviews.reviewRating,
+      reviewText: businessReputationReviews.reviewText,
+    })
+    .from(businessReputationReviews);
+  const reviewsByProfileId = new Map<string, typeof allReviews>();
+  for (const r of allReviews) {
+    const bucket = reviewsByProfileId.get(r.businessReputationProfileId);
+    if (bucket === undefined) reviewsByProfileId.set(r.businessReputationProfileId, [r]);
+    else bucket.push(r);
+  }
+
+  const allComplaints = await db
+    .select({
+      businessReputationProfileId: businessReputationComplaints.businessReputationProfileId,
+      complaintType: businessReputationComplaints.complaintType,
+      complaintStatus: businessReputationComplaints.complaintStatus,
+      complaintSummary: businessReputationComplaints.complaintSummary,
+    })
+    .from(businessReputationComplaints);
+  const complaintsByProfileId = new Map<string, typeof allComplaints>();
+  for (const c of allComplaints) {
+    const bucket = complaintsByProfileId.get(c.businessReputationProfileId);
+    if (bucket === undefined) complaintsByProfileId.set(c.businessReputationProfileId, [c]);
+    else bucket.push(c);
+  }
+
+  function truncate(text: string, maxLength: number): string {
+    return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+  }
+
   const companyIds = new Set<string>([
     ...permitRows.map((r) => r.companyId!),
     ...bbbRows.map((r) => r.companyId!),
@@ -213,10 +249,28 @@ async function buildContractorSummaries(): Promise<void> {
         ? `BBB rating: ${bbb.bbbRating ?? "not rated"}, ${bbb.reviewCount ?? 0} reviews, ${realComplaintCount} complaints.`
         : "No BBB profile on file.";
 
+    const reviewSnippets = bbb !== undefined ? (reviewsByProfileId.get(bbb.businessReputationProfileId) ?? []) : [];
+    const reviewText =
+      reviewSnippets.length > 0
+        ? ` Review excerpts: ${reviewSnippets
+            .slice(0, 3)
+            .map((r) => `[${r.reviewRating ?? "?"}/5] "${truncate(r.reviewText ?? "", 200)}"`)
+            .join(" | ")}`
+        : "";
+
+    const complaintSnippets = bbb !== undefined ? (complaintsByProfileId.get(bbb.businessReputationProfileId) ?? []) : [];
+    const complaintText =
+      complaintSnippets.length > 0
+        ? ` Complaint details: ${complaintSnippets
+            .slice(0, 3)
+            .map((c) => `${c.complaintType ?? "unknown type"} (${c.complaintStatus ?? "unknown status"})${c.complaintSummary !== null ? `: ${truncate(c.complaintSummary, 150)}` : ""}`)
+            .join(" | ")}`
+        : "";
+
     summaries.push({
       entityType: "contractor",
       entityId: companyId,
-      content: `Contractor: ${name}. ${permitSummary} ${bbbSummary}`,
+      content: `Contractor: ${name}. ${permitSummary} ${bbbSummary}${reviewText}${complaintText}`,
     });
   }
 
