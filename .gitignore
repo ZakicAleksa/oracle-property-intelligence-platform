@@ -46,3 +46,5 @@ next-env.d.ts
 
 # ingestion pipeline artifacts (regenerable from the Parquet source)
 scripts/ingest/*.json
+
+.env*
