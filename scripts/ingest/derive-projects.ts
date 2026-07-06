@@ -11,7 +11,14 @@ const { propertyImprovements, projects, projectPermits } = schema;
 
 const SOURCE_SYSTEM = "derived_projects";
 
-type ProjectType = "roofing" | "electrical" | "concrete" | "structural" | "plumbing" | "hvac" | "other";
+type ProjectType =
+  | "roofing"
+  | "electrical"
+  | "concrete"
+  | "structural"
+  | "plumbing"
+  | "hvac"
+  | "other";
 
 const KEYWORD_TO_TYPE: [RegExp, ProjectType][] = [
   [/roof/i, "roofing"],
@@ -61,13 +68,21 @@ async function main(): Promise<void> {
 
   for (const [key, permitRows] of groups) {
     const first = permitRows[0]!;
-    const projectType = classify(first.projectDescription ?? first.improvementType);
-    const dates = permitRows.map((r) => r.completionDate).filter((d): d is string => d !== null);
-    const totalValue = permitRows.reduce((sum, r) => sum + Number(r.estimatedJobValue ?? 0), 0);
+    const projectType = classify(
+      first.projectDescription ?? first.improvementType,
+    );
+    const dates = permitRows
+      .map((r) => r.completionDate)
+      .filter((d): d is string => d !== null);
+    const totalValue = permitRows.reduce(
+      (sum, r) => sum + Number(r.estimatedJobValue ?? 0),
+      0,
+    );
 
     const sortedDates = [...dates].sort();
     const startDate: string | undefined = sortedDates[0];
-    const endDate: string | undefined = sortedDates.length > 0 ? sortedDates[sortedDates.length - 1] : undefined;
+    const endDate: string | undefined =
+      sortedDates.length > 0 ? sortedDates[sortedDates.length - 1] : undefined;
 
     const projectId = randomUUID();
     const inserted = await db
@@ -84,7 +99,9 @@ async function main(): Promise<void> {
         sourceRecordKey: key,
         loadedAt: now,
       })
-      .onConflictDoNothing({ target: [projects.sourceSystem, projects.sourceRecordKey] })
+      .onConflictDoNothing({
+        target: [projects.sourceSystem, projects.sourceRecordKey],
+      })
       .returning({ projectId: projects.projectId });
 
     const finalProjectId = inserted[0]?.projectId ?? projectId;
@@ -101,7 +118,9 @@ async function main(): Promise<void> {
       .onConflictDoNothing();
   }
 
-  console.log(`Created ${created} projects (${groups.size - created} already existed).`);
+  console.log(
+    `Created ${created} projects (${groups.size - created} already existed).`,
+  );
 }
 
 main()

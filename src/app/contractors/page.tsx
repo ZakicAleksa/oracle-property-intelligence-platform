@@ -43,13 +43,19 @@ export default function ContractorsPage() {
           className="border border-line bg-paper-raised px-3 py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-stamp-closed"
         />
         <label className="flex items-center gap-2 text-ink-muted">
-          <input type="checkbox" checked={onlyNegativeBbb} onChange={(e) => setOnlyNegativeBbb(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={onlyNegativeBbb}
+            onChange={(e) => setOnlyNegativeBbb(e.target.checked)}
+          />
           Negative BBB rating only
         </label>
       </div>
 
       {isLoading && <p className="text-ink-muted">Loading records...</p>}
-      {isError && <p className="text-stamp-open">Couldn&apos;t load contractors.</p>}
+      {isError && (
+        <p className="text-stamp-open">Couldn&apos;t load contractors.</p>
+      )}
 
       {data !== undefined && (
         <div className="border-t border-line">
@@ -62,7 +68,8 @@ export default function ContractorsPage() {
               <div className="min-w-0">
                 <p className="truncate font-medium">{row.name ?? "Unknown"}</p>
                 <p className="eyebrow">
-                  {row.permitCount ?? 0} permit{row.permitCount === 1 ? "" : "s"}
+                  {row.permitCount ?? 0} permit
+                  {row.permitCount === 1 ? "" : "s"}
                   {row.reviewCount !== null && ` · ${row.reviewCount} reviews`}
                 </p>
               </div>
@@ -71,7 +78,11 @@ export default function ContractorsPage() {
               </span>
             </Link>
           ))}
-          {data.length === 0 && <p className="py-6 text-ink-muted">No contractors match these filters.</p>}
+          {data.length === 0 && (
+            <p className="py-6 text-ink-muted">
+              No contractors match these filters.
+            </p>
+          )}
         </div>
       )}
     </div>

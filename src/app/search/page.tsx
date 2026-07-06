@@ -31,7 +31,10 @@ export default function SearchPage() {
           placeholder="e.g. Which contractors have negative BBB ratings?"
           className="flex-1 border border-line bg-paper-raised px-3 py-2 outline-none focus-visible:ring-2 focus-visible:ring-stamp-closed"
         />
-        <button type="submit" className="border border-ink bg-ink px-4 py-2 text-paper hover:opacity-90">
+        <button
+          type="submit"
+          className="border border-ink bg-ink px-4 py-2 text-paper hover:opacity-90"
+        >
           Ask
         </button>
       </form>
@@ -48,15 +51,20 @@ export default function SearchPage() {
 
           {data.citations.length > 0 && (
             <div>
-              <p className="eyebrow mb-3 border-b border-line pb-2">Citations</p>
+              <p className="eyebrow mb-3 border-b border-line pb-2">
+                Citations
+              </p>
               <ul className="space-y-2">
                 {data.citations.map((c) => (
                   <li key={c.index} className="flex items-center gap-3">
                     <span className="stamp stamp-neutral">
-                      [{c.index}] {c.sourceSystem}:{c.sourceRecordKey.slice(0, 16)}
+                      [{c.index}] {c.sourceSystem}:
+                      {c.sourceRecordKey.slice(0, 16)}
                       {c.sourceRecordKey.length > 16 && "…"}
                     </span>
-                    <span className="eyebrow">similarity {c.similarity.toFixed(3)}</span>
+                    <span className="eyebrow">
+                      similarity {c.similarity.toFixed(3)}
+                    </span>
                   </li>
                 ))}
               </ul>

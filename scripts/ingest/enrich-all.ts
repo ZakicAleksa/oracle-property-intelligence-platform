@@ -85,28 +85,41 @@ async function runPool<T>(
     }
   }
 
-  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, runWorker));
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, runWorker),
+  );
   return { succeeded, failed };
 }
 
 async function main(): Promise<void> {
   const { file, idsFile, limit, concurrency } = parseArgs();
 
-  const backboneIds = new Set<string>(JSON.parse(await readFile(idsFile, "utf8")) as string[]);
+  const backboneIds = new Set<string>(
+    JSON.parse(await readFile(idsFile, "utf8")) as string[],
+  );
 
   console.log(`Reading Parquet file: ${file}`);
   const buffer = await asyncBufferFromFile(file);
   const rows = (await parquetReadObjects({
     file: buffer,
-    columns: ["property_id", "property_cid", "has_permits", "has_sunbiz_tenant", "has_bbb_contractor"],
+    columns: [
+      "property_id",
+      "property_cid",
+      "has_permits",
+      "has_sunbiz_tenant",
+      "has_bbb_contractor",
+    ],
   })) as ParquetRow[];
 
   const candidates = rows.filter(
     (row) =>
       backboneIds.has(row.property_id) &&
-      (Boolean(row.has_permits) || Boolean(row.has_sunbiz_tenant) || Boolean(row.has_bbb_contractor)),
+      (Boolean(row.has_permits) ||
+        Boolean(row.has_sunbiz_tenant) ||
+        Boolean(row.has_bbb_contractor)),
   );
-  const selected = limit === undefined ? candidates : candidates.slice(0, limit);
+  const selected =
+    limit === undefined ? candidates : candidates.slice(0, limit);
   console.log(
     `${candidates.length} backbone properties have any signal; enriching ${selected.length} with concurrency=${concurrency}.`,
   );

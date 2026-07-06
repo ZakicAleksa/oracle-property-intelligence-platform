@@ -16,7 +16,11 @@ const {
 } = schema;
 
 function normalizeOwnerName(text: string | null): string {
-  return (text ?? "").toUpperCase().replace(/[.,]/g, "").replace(/\s+/g, " ").trim();
+  return (text ?? "")
+    .toUpperCase()
+    .replace(/[.,]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 const SOURCE_SYSTEM = "sunbiz";
@@ -50,7 +54,9 @@ export async function loadSunbizForProperty(
   // the same registration appears twice in the raw array (seen live earlier).
   const uniqueTenants = [
     ...new Map(
-      sunbizTenants.filter((t) => t.documentNumber !== null).map((t) => [t.documentNumber, t]),
+      sunbizTenants
+        .filter((t) => t.documentNumber !== null)
+        .map((t) => [t.documentNumber, t]),
     ).values(),
   ];
   if (uniqueTenants.length === 0) return;
@@ -74,7 +80,10 @@ export async function loadSunbizForProperty(
       })),
     )
     .onConflictDoUpdate({
-      target: [businessRegistrations.sourceSystem, businessRegistrations.sourceRecordKey],
+      target: [
+        businessRegistrations.sourceSystem,
+        businessRegistrations.sourceRecordKey,
+      ],
       set: {
         entityName: excluded("entity_name"),
         status: excluded("status"),
@@ -92,11 +101,14 @@ export async function loadSunbizForProperty(
     })
     .from(businessRegistrations)
     .where(inArray(businessRegistrations.sourceRecordKey, documentNumbers));
-  const registrationIdByDocNumber = new Map(idRows.map((row) => [row.key, row.id]));
+  const registrationIdByDocNumber = new Map(
+    idRows.map((row) => [row.key, row.id]),
+  );
 
   const addressRows: (typeof businessRegistrationAddresses.$inferInsert)[] = [];
   const partyRows: (typeof businessRegistrationParties.$inferInsert)[] = [];
-  const reportRows: (typeof businessRegistrationAnnualReports.$inferInsert)[] = [];
+  const reportRows: (typeof businessRegistrationAnnualReports.$inferInsert)[] =
+    [];
   const tenantRows: (typeof tenants.$inferInsert)[] = [];
 
   const ownerRows = await db
@@ -106,13 +118,21 @@ export async function loadSunbizForProperty(
 
   for (const tenant of uniqueTenants) {
     const documentNumber = tenant.documentNumber!;
-    const businessRegistrationId = registrationIdByDocNumber.get(documentNumber);
+    const businessRegistrationId =
+      registrationIdByDocNumber.get(documentNumber);
     if (businessRegistrationId === undefined) continue;
 
     if (tenant.entityName !== null) {
-      const companyId = await resolveCompanyId(tenant.entityName, SOURCE_SYSTEM, now);
+      const companyId = await resolveCompanyId(
+        tenant.entityName,
+        SOURCE_SYSTEM,
+        now,
+      );
       const isOwnerOccupied = ownerRows.some(
-        (o) => o.ownedBy !== null && normalizeOwnerName(o.ownedBy) === normalizeOwnerName(tenant.entityName),
+        (o) =>
+          o.ownedBy !== null &&
+          normalizeOwnerName(o.ownedBy) ===
+            normalizeOwnerName(tenant.entityName),
       );
       tenantRows.push({
         tenantId: randomUUID(),
@@ -175,7 +195,10 @@ export async function loadSunbizForProperty(
       .insert(businessRegistrationAddresses)
       .values(addressRows)
       .onConflictDoNothing({
-        target: [businessRegistrationAddresses.sourceSystem, businessRegistrationAddresses.sourceRecordKey],
+        target: [
+          businessRegistrationAddresses.sourceSystem,
+          businessRegistrationAddresses.sourceRecordKey,
+        ],
       });
   }
   if (partyRows.length > 0) {
@@ -183,7 +206,10 @@ export async function loadSunbizForProperty(
       .insert(businessRegistrationParties)
       .values(partyRows)
       .onConflictDoNothing({
-        target: [businessRegistrationParties.sourceSystem, businessRegistrationParties.sourceRecordKey],
+        target: [
+          businessRegistrationParties.sourceSystem,
+          businessRegistrationParties.sourceRecordKey,
+        ],
       });
   }
   if (reportRows.length > 0) {
@@ -201,7 +227,9 @@ export async function loadSunbizForProperty(
     await db
       .insert(tenants)
       .values(tenantRows)
-      .onConflictDoNothing({ target: [tenants.sourceSystem, tenants.sourceRecordKey] });
+      .onConflictDoNothing({
+        target: [tenants.sourceSystem, tenants.sourceRecordKey],
+      });
   }
 
   await db
@@ -214,5 +242,7 @@ export async function loadSunbizForProperty(
         loadedAt: now,
       })),
     )
-    .onConflictDoNothing({ target: [publicRecords.sourceSystem, publicRecords.sourceRecordKey] });
+    .onConflictDoNothing({
+      target: [publicRecords.sourceSystem, publicRecords.sourceRecordKey],
+    });
 }

@@ -15,7 +15,12 @@ const {
 
 export const businessesRouter = router({
   list: publicProcedure
-    .input(z.object({ name: z.string().optional(), limit: z.number().min(1).max(200).default(50) }))
+    .input(
+      z.object({
+        name: z.string().optional(),
+        limit: z.number().min(1).max(200).default(50),
+      }),
+    )
     .query(async ({ input }) => {
       return db
         .select({
@@ -40,7 +45,12 @@ export const businessesRouter = router({
       const [registration] = await db
         .select()
         .from(businessRegistrations)
-        .where(eq(businessRegistrations.businessRegistrationId, input.businessRegistrationId))
+        .where(
+          eq(
+            businessRegistrations.businessRegistrationId,
+            input.businessRegistrationId,
+          ),
+        )
         .limit(1);
 
       const addressRows = await db
@@ -52,7 +62,12 @@ export const businessesRouter = router({
           zip: businessRegistrationAddresses.zip,
         })
         .from(businessRegistrationAddresses)
-        .where(eq(businessRegistrationAddresses.businessRegistrationId, input.businessRegistrationId));
+        .where(
+          eq(
+            businessRegistrationAddresses.businessRegistrationId,
+            input.businessRegistrationId,
+          ),
+        );
 
       const parties = await db
         .select({
@@ -61,10 +76,16 @@ export const businessesRouter = router({
           title: businessRegistrationParties.title,
         })
         .from(businessRegistrationParties)
-        .where(eq(businessRegistrationParties.businessRegistrationId, input.businessRegistrationId));
+        .where(
+          eq(
+            businessRegistrationParties.businessRegistrationId,
+            input.businessRegistrationId,
+          ),
+        );
 
       const relatedProperties =
-        registration?.companyId !== null && registration?.companyId !== undefined
+        registration?.companyId !== null &&
+        registration?.companyId !== undefined
           ? await db
               .select({
                 propertyId: properties.propertyId,
@@ -72,11 +93,22 @@ export const businessesRouter = router({
                 occupancyStatus: tenants.occupancyStatus,
               })
               .from(tenants)
-              .innerJoin(properties, eq(properties.propertyId, tenants.propertyId))
-              .leftJoin(addresses, eq(addresses.addressId, properties.addressId))
+              .innerJoin(
+                properties,
+                eq(properties.propertyId, tenants.propertyId),
+              )
+              .leftJoin(
+                addresses,
+                eq(addresses.addressId, properties.addressId),
+              )
               .where(eq(tenants.businessCompanyId, registration.companyId))
           : [];
 
-      return { registration, addresses: addressRows, parties, relatedProperties };
+      return {
+        registration,
+        addresses: addressRows,
+        parties,
+        relatedProperties,
+      };
     }),
 });

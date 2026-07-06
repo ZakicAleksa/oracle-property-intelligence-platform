@@ -12,7 +12,10 @@ export function Nav() {
   return (
     <header className="border-b border-line bg-paper-raised">
       <div className="mx-auto flex max-w-5xl items-center gap-1 px-6">
-        <Link href="/" className="mr-4 py-3 font-display text-base font-semibold">
+        <Link
+          href="/"
+          className="mr-4 py-3 font-display text-base font-semibold"
+        >
           Oracle
         </Link>
         <nav className="flex gap-1 text-sm">

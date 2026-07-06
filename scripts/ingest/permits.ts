@@ -48,7 +48,11 @@ function deriveImprovementStatus(recordStatus: string | null): string | null {
   ) {
     return "closed";
   }
-  if (normalized.includes("open") || normalized.includes("issued") || normalized.includes("active")) {
+  if (
+    normalized.includes("open") ||
+    normalized.includes("issued") ||
+    normalized.includes("active")
+  ) {
     return "open";
   }
   return "unknown";
@@ -101,7 +105,10 @@ export async function loadPermitsForProperty(
       })),
     )
     .onConflictDoUpdate({
-      target: [propertyImprovements.sourceSystem, propertyImprovements.sourceRecordKey],
+      target: [
+        propertyImprovements.sourceSystem,
+        propertyImprovements.sourceRecordKey,
+      ],
       set: {
         improvementType: excluded("improvement_type"),
         improvementStatus: excluded("improvement_status"),
@@ -116,21 +123,30 @@ export async function loadPermitsForProperty(
     });
 
   const idRows = await db
-    .select({ key: propertyImprovements.sourceRecordKey, id: propertyImprovements.propertyImprovementId })
+    .select({
+      key: propertyImprovements.sourceRecordKey,
+      id: propertyImprovements.propertyImprovementId,
+    })
     .from(propertyImprovements)
     .where(inArray(propertyImprovements.sourceRecordKey, permitSourceKeys));
-  const propertyImprovementIdByKey = new Map(idRows.map((row) => [row.key, row.id]));
+  const propertyImprovementIdByKey = new Map(
+    idRows.map((row) => [row.key, row.id]),
+  );
 
   const contactRows: (typeof permitContacts.$inferInsert)[] = [];
   const eventRows: (typeof permitEvents.$inferInsert)[] = [];
   const feeRows: (typeof permitFees.$inferInsert)[] = [];
   const linkRows: (typeof permitLinks.$inferInsert)[] = [];
   const fieldRows: (typeof permitCustomFields.$inferInsert)[] = [];
-  const contractorUpdates: { propertyImprovementId: string; companyId: string }[] = [];
+  const contractorUpdates: {
+    propertyImprovementId: string;
+    companyId: string;
+  }[] = [];
 
   for (const [index, permit] of permits.entries()) {
     const permitSourceKey = permitSourceKeys[index]!;
-    const propertyImprovementId = propertyImprovementIdByKey.get(permitSourceKey);
+    const propertyImprovementId =
+      propertyImprovementIdByKey.get(permitSourceKey);
     if (propertyImprovementId === undefined) continue;
 
     let primaryContractorCompanyId: string | null = null;
@@ -139,8 +155,13 @@ export async function loadPermitsForProperty(
       const parsed = parseContactRawName(contact.rawName);
       let companyId: string | null = null;
       if (parsed.cleanedName !== null) {
-        companyId = await resolveCompanyId(parsed.cleanedName, SOURCE_SYSTEM, now);
-        if (primaryContractorCompanyId === null) primaryContractorCompanyId = companyId;
+        companyId = await resolveCompanyId(
+          parsed.cleanedName,
+          SOURCE_SYSTEM,
+          now,
+        );
+        if (primaryContractorCompanyId === null)
+          primaryContractorCompanyId = companyId;
       }
 
       contactRows.push({
@@ -158,7 +179,10 @@ export async function loadPermitsForProperty(
     }
 
     if (primaryContractorCompanyId !== null) {
-      contractorUpdates.push({ propertyImprovementId, companyId: primaryContractorCompanyId });
+      contractorUpdates.push({
+        propertyImprovementId,
+        companyId: primaryContractorCompanyId,
+      });
     }
 
     for (const [eventIndex, event] of permit.events.entries()) {
@@ -219,32 +243,43 @@ export async function loadPermitsForProperty(
     await db
       .insert(permitContacts)
       .values(contactRows)
-      .onConflictDoNothing({ target: [permitContacts.sourceSystem, permitContacts.sourceRecordKey] });
+      .onConflictDoNothing({
+        target: [permitContacts.sourceSystem, permitContacts.sourceRecordKey],
+      });
   }
   if (eventRows.length > 0) {
     await db
       .insert(permitEvents)
       .values(eventRows)
-      .onConflictDoNothing({ target: [permitEvents.sourceSystem, permitEvents.sourceRecordKey] });
+      .onConflictDoNothing({
+        target: [permitEvents.sourceSystem, permitEvents.sourceRecordKey],
+      });
   }
   if (feeRows.length > 0) {
     await db
       .insert(permitFees)
       .values(feeRows)
-      .onConflictDoNothing({ target: [permitFees.sourceSystem, permitFees.sourceRecordKey] });
+      .onConflictDoNothing({
+        target: [permitFees.sourceSystem, permitFees.sourceRecordKey],
+      });
   }
   if (linkRows.length > 0) {
     await db
       .insert(permitLinks)
       .values(linkRows)
-      .onConflictDoNothing({ target: [permitLinks.sourceSystem, permitLinks.sourceRecordKey] });
+      .onConflictDoNothing({
+        target: [permitLinks.sourceSystem, permitLinks.sourceRecordKey],
+      });
   }
   if (fieldRows.length > 0) {
     await db
       .insert(permitCustomFields)
       .values(fieldRows)
       .onConflictDoNothing({
-        target: [permitCustomFields.sourceSystem, permitCustomFields.sourceRecordKey],
+        target: [
+          permitCustomFields.sourceSystem,
+          permitCustomFields.sourceRecordKey,
+        ],
       });
   }
 
@@ -252,7 +287,12 @@ export async function loadPermitsForProperty(
     await db
       .update(propertyImprovements)
       .set({ contractorCompanyId: update.companyId })
-      .where(eq(propertyImprovements.propertyImprovementId, update.propertyImprovementId));
+      .where(
+        eq(
+          propertyImprovements.propertyImprovementId,
+          update.propertyImprovementId,
+        ),
+      );
   }
 
   await db
@@ -265,5 +305,7 @@ export async function loadPermitsForProperty(
         loadedAt: now,
       })),
     )
-    .onConflictDoNothing({ target: [publicRecords.sourceSystem, publicRecords.sourceRecordKey] });
+    .onConflictDoNothing({
+      target: [publicRecords.sourceSystem, publicRecords.sourceRecordKey],
+    });
 }

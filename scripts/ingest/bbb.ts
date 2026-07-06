@@ -5,8 +5,13 @@ import { resolveCompanyId } from "./contractor.js";
 import { db, schema } from "./db.js";
 import type { BbbProfile } from "./fetch-property.js";
 
-const { businessReputationProfiles, businessReputationReviews, businessReputationComplaints, contractorQualityScores, publicRecords } =
-  schema;
+const {
+  businessReputationProfiles,
+  businessReputationReviews,
+  businessReputationComplaints,
+  contractorQualityScores,
+  publicRecords,
+} = schema;
 
 const SOURCE_SYSTEM = "bbb";
 
@@ -20,7 +25,9 @@ function toDateOnly(value: unknown): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
 }
 
-function toNumericString(value: string | number | null | undefined): string | null {
+function toNumericString(
+  value: string | number | null | undefined,
+): string | null {
   return value === null || value === undefined ? null : String(value);
 }
 
@@ -33,13 +40,19 @@ function toNumericString(value: string | number | null | undefined): string | nu
  * testing 9 more mappers wasn't worth the time given the priority on speed.
  * Revisit only if a specific demo need surfaces for one of them.
  */
-export async function loadBbbForProperty(profiles: BbbProfile[], now: Date): Promise<void> {
+export async function loadBbbForProperty(
+  profiles: BbbProfile[],
+  now: Date,
+): Promise<void> {
   if (profiles.length === 0) return;
 
   const keyed = profiles
     .map((profile, index) => ({
       profile,
-      key: profile.profileUrl ?? (profile.name !== null ? `name:${profile.name}` : null) ?? `idx:${index}`,
+      key:
+        profile.profileUrl ??
+        (profile.name !== null ? `name:${profile.name}` : null) ??
+        `idx:${index}`,
     }))
     .filter((entry) => entry.key !== null);
   if (keyed.length === 0) return;
@@ -63,7 +76,10 @@ export async function loadBbbForProperty(profiles: BbbProfile[], now: Date): Pro
       })),
     )
     .onConflictDoUpdate({
-      target: [businessReputationProfiles.sourceSystem, businessReputationProfiles.sourceRecordKey],
+      target: [
+        businessReputationProfiles.sourceSystem,
+        businessReputationProfiles.sourceRecordKey,
+      ],
       set: {
         bbbRating: excluded("bbb_rating"),
         isAccredited: excluded("is_accredited"),
@@ -84,7 +100,8 @@ export async function loadBbbForProperty(profiles: BbbProfile[], now: Date): Pro
   const profileIdByKey = new Map(idRows.map((row) => [row.key, row.id]));
 
   const reviewRows: (typeof businessReputationReviews.$inferInsert)[] = [];
-  const complaintRows: (typeof businessReputationComplaints.$inferInsert)[] = [];
+  const complaintRows: (typeof businessReputationComplaints.$inferInsert)[] =
+    [];
   const scoreRows: (typeof contractorQualityScores.$inferInsert)[] = [];
 
   for (const { profile, key } of keyed) {
@@ -97,7 +114,12 @@ export async function loadBbbForProperty(profiles: BbbProfile[], now: Date): Pro
       await db
         .update(businessReputationProfiles)
         .set({ companyId })
-        .where(eq(businessReputationProfiles.businessReputationProfileId, businessReputationProfileId));
+        .where(
+          eq(
+            businessReputationProfiles.businessReputationProfileId,
+            businessReputationProfileId,
+          ),
+        );
     }
 
     for (const [index, review] of profile.reviews.entries()) {
@@ -149,7 +171,10 @@ export async function loadBbbForProperty(profiles: BbbProfile[], now: Date): Pro
       .insert(businessReputationReviews)
       .values(reviewRows)
       .onConflictDoNothing({
-        target: [businessReputationReviews.sourceSystem, businessReputationReviews.sourceRecordKey],
+        target: [
+          businessReputationReviews.sourceSystem,
+          businessReputationReviews.sourceRecordKey,
+        ],
       });
   }
   if (complaintRows.length > 0) {
@@ -157,7 +182,10 @@ export async function loadBbbForProperty(profiles: BbbProfile[], now: Date): Pro
       .insert(businessReputationComplaints)
       .values(complaintRows)
       .onConflictDoNothing({
-        target: [businessReputationComplaints.sourceSystem, businessReputationComplaints.sourceRecordKey],
+        target: [
+          businessReputationComplaints.sourceSystem,
+          businessReputationComplaints.sourceRecordKey,
+        ],
       });
   }
   if (scoreRows.length > 0) {
@@ -165,7 +193,10 @@ export async function loadBbbForProperty(profiles: BbbProfile[], now: Date): Pro
       .insert(contractorQualityScores)
       .values(scoreRows)
       .onConflictDoNothing({
-        target: [contractorQualityScores.sourceSystem, contractorQualityScores.sourceRecordKey],
+        target: [
+          contractorQualityScores.sourceSystem,
+          contractorQualityScores.sourceRecordKey,
+        ],
       });
   }
 
@@ -179,5 +210,7 @@ export async function loadBbbForProperty(profiles: BbbProfile[], now: Date): Pro
         loadedAt: now,
       })),
     )
-    .onConflictDoNothing({ target: [publicRecords.sourceSystem, publicRecords.sourceRecordKey] });
+    .onConflictDoNothing({
+      target: [publicRecords.sourceSystem, publicRecords.sourceRecordKey],
+    });
 }

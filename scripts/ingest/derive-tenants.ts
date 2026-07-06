@@ -9,18 +9,30 @@ import { eq, sql } from "drizzle-orm";
 
 import { db, schema } from "./db.js";
 
-const { businessRegistrationAddresses, businessRegistrations, addresses, properties, ownerships, tenants } = schema;
+const {
+  businessRegistrationAddresses,
+  businessRegistrations,
+  addresses,
+  properties,
+  ownerships,
+  tenants,
+} = schema;
 
 const SOURCE_SYSTEM = "derived_tenants";
 
 function normalize(text: string | null): string {
-  return (text ?? "").toUpperCase().replace(/[.,]/g, "").replace(/\s+/g, " ").trim();
+  return (text ?? "")
+    .toUpperCase()
+    .replace(/[.,]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 async function main(): Promise<void> {
   const registrationAddresses = await db
     .select({
-      businessRegistrationId: businessRegistrationAddresses.businessRegistrationId,
+      businessRegistrationId:
+        businessRegistrationAddresses.businessRegistrationId,
       zip: businessRegistrationAddresses.zip,
       city: businessRegistrationAddresses.city,
       line1: businessRegistrationAddresses.line1,
@@ -30,17 +42,23 @@ async function main(): Promise<void> {
     .from(businessRegistrationAddresses)
     .innerJoin(
       businessRegistrations,
-      eq(businessRegistrations.businessRegistrationId, businessRegistrationAddresses.businessRegistrationId),
+      eq(
+        businessRegistrations.businessRegistrationId,
+        businessRegistrationAddresses.businessRegistrationId,
+      ),
     );
 
-  console.log(`${registrationAddresses.length} business registration addresses to match.`);
+  console.log(
+    `${registrationAddresses.length} business registration addresses to match.`,
+  );
 
   const now = new Date();
   let created = 0;
   let matched = 0;
 
   for (const reg of registrationAddresses) {
-    if (reg.zip === null || reg.line1 === null || reg.companyId === null) continue;
+    if (reg.zip === null || reg.line1 === null || reg.companyId === null)
+      continue;
     const zipPrefix = reg.zip.slice(0, 5);
 
     const candidates = await db
@@ -73,7 +91,9 @@ async function main(): Promise<void> {
       .where(eq(ownerships.propertyId, match.propertyId))
       .limit(5);
     const isOwnerOccupied = ownerRows.some(
-      (o) => o.ownedBy !== null && normalize(o.ownedBy) === normalize(reg.entityName),
+      (o) =>
+        o.ownedBy !== null &&
+        normalize(o.ownedBy) === normalize(reg.entityName),
     );
 
     const inserted = await db
@@ -87,13 +107,17 @@ async function main(): Promise<void> {
         sourceRecordKey: `${reg.businessRegistrationId}:${match.propertyId}`,
         loadedAt: now,
       })
-      .onConflictDoNothing({ target: [tenants.sourceSystem, tenants.sourceRecordKey] })
+      .onConflictDoNothing({
+        target: [tenants.sourceSystem, tenants.sourceRecordKey],
+      })
       .returning({ tenantId: tenants.tenantId });
 
     if (inserted[0] !== undefined) created++;
   }
 
-  console.log(`${matched} address matches found, ${created} tenant rows created.`);
+  console.log(
+    `${matched} address matches found, ${created} tenant rows created.`,
+  );
 }
 
 main()

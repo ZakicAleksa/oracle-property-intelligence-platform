@@ -46,7 +46,9 @@ export default function PropertiesPage() {
       </div>
 
       {isLoading && <p className="text-ink-muted">Loading records...</p>}
-      {isError && <p className="text-stamp-open">Couldn&apos;t load properties.</p>}
+      {isError && (
+        <p className="text-stamp-open">Couldn&apos;t load properties.</p>
+      )}
 
       {data !== undefined && (
         <div className="border-t border-line">
@@ -57,17 +59,26 @@ export default function PropertiesPage() {
               className="ledger-row flex items-center justify-between gap-4 px-1 py-3 text-sm"
             >
               <div className="min-w-0">
-                <p className="truncate font-medium">{row.unnormalizedAddress ?? "Unknown address"}</p>
+                <p className="truncate font-medium">
+                  {row.unnormalizedAddress ?? "Unknown address"}
+                </p>
                 <p className="eyebrow">
-                  {row.cityName ?? "unknown city"} &middot; {row.propertyType ?? "unknown type"}
+                  {row.cityName ?? "unknown city"} &middot;{" "}
+                  {row.propertyType ?? "unknown type"}
                 </p>
               </div>
-              <span className={`stamp shrink-0 ${Number(row.openPermitCount) > 0 ? "stamp-open" : "stamp-neutral"}`}>
+              <span
+                className={`stamp shrink-0 ${Number(row.openPermitCount) > 0 ? "stamp-open" : "stamp-neutral"}`}
+              >
                 {row.openPermitCount} open
               </span>
             </Link>
           ))}
-          {data.length === 0 && <p className="py-6 text-ink-muted">No properties match these filters.</p>}
+          {data.length === 0 && (
+            <p className="py-6 text-ink-muted">
+              No properties match these filters.
+            </p>
+          )}
         </div>
       )}
     </div>
