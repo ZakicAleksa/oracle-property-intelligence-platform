@@ -128,6 +128,15 @@ export async function loadSunbizForProperty(
         SOURCE_SYSTEM,
         now,
       );
+      // Same bug class as the BBB profile fix: resolving a companyId isn't
+      // enough on its own -- the businessRegistrations row itself needs it
+      // written back, or businesses.detail's relatedProperties lookup (which
+      // checks registration.companyId) always finds nothing even when the
+      // real tenant/occupancy link exists.
+      await db
+        .update(businessRegistrations)
+        .set({ companyId })
+        .where(eq(businessRegistrations.businessRegistrationId, businessRegistrationId));
       const isOwnerOccupied = ownerRows.some(
         (o) =>
           o.ownedBy !== null &&
