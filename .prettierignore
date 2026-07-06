@@ -1,0 +1,11 @@
+.next
+node_modules
+drizzle
+src/server/elephant-query-db
+
+# Vendored kit content — not ours to reformat
+.claude
+
+# Hand-written prose docs — avoid unwanted rewrapping; also protects
+# README.md, which is the assignment spec and must never be edited
+*.md
