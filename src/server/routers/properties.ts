@@ -39,6 +39,11 @@ export const propertiesRouter = router({
           permitTypes: sql<string[]>`array_agg(distinct ${propertyImprovements.improvementType})`.as(
             "permit_types",
           ),
+          openPermitTypes: sql<
+            string[]
+          >`array_agg(distinct ${propertyImprovements.improvementType}) filter (where ${propertyImprovements.improvementStatus} = 'open')`.as(
+            "open_permit_types",
+          ),
         })
         .from(propertyImprovements)
         .groupBy(propertyImprovements.propertyId)
@@ -60,7 +65,7 @@ export const propertiesRouter = router({
           and(
             ...conditions,
             input.permitType !== undefined
-              ? sql`${input.permitType} = ANY(${openPermitCounts.permitTypes})`
+              ? sql`EXISTS (SELECT 1 FROM unnest(${openPermitCounts.openPermitTypes}) AS t WHERE t ILIKE ${"%" + input.permitType + "%"})`
               : undefined,
             input.onlyMultipleOpenPermits === true ? sql`${openPermitCounts.openCount} > 1` : undefined,
           ),
