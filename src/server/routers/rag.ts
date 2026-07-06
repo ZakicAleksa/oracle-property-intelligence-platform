@@ -353,7 +353,15 @@ export const ragRouter = router({
         findContractorsByWorkType: "contractor",
         findProjectsByNegativeBbbContractors: "contractor",
       };
-      let nextCitationIndex = matches.length + 1;
+      // A tool call means the answer was built from real structured-query
+      // rows, not the vector-similarity context (the system prompt tells the
+      // model to prefer tools "rather than the numbered context below" for
+      // exactly these questions) -- citing both muddies source attribution,
+      // e.g. an unrelated semantically-similar entity showing up alongside
+      // the real ranked list. Cite only whichever path actually produced the
+      // answer.
+      const usedTools = result.toolResults.length > 0;
+      let nextCitationIndex = 1;
       const toolCitations = result.toolResults.flatMap((toolResult) => {
         const rows = Array.isArray(toolResult.output) ? toolResult.output : [];
         return rows.map(
@@ -370,17 +378,16 @@ export const ragRouter = router({
 
       return {
         answer: result.text,
-        citations: [
-          ...matches.map((m, i) => ({
-            index: i + 1,
-            entityType: m.entityType,
-            entityId: m.entityId,
-            sourceSystem: m.sourceSystem,
-            sourceRecordKey: m.sourceRecordKey,
-            similarity: m.similarity as number | null,
-          })),
-          ...toolCitations,
-        ],
+        citations: usedTools
+          ? toolCitations
+          : matches.map((m, i) => ({
+              index: i + 1,
+              entityType: m.entityType,
+              entityId: m.entityId,
+              sourceSystem: m.sourceSystem,
+              sourceRecordKey: m.sourceRecordKey,
+              similarity: m.similarity as number | null,
+            })),
       };
     }),
 });
