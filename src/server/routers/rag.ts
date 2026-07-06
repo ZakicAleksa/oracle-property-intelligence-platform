@@ -1,14 +1,22 @@
-import { embed, generateText } from "ai";
-import { cosineDistance, inArray, or, sql } from "drizzle-orm";
+import { embed, generateText, stepCountIs, tool } from "ai";
+import { cosineDistance, desc, eq, gt, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db, schema } from "../db";
 import { publicProcedure, router } from "../trpc";
 
-const { entityEmbeddings } = schema;
+const {
+  entityEmbeddings,
+  properties,
+  addresses,
+  propertyImprovements,
+  companies,
+  businessReputationProfiles,
+} = schema;
 
 const EMBEDDING_MODEL = "openai/text-embedding-3-small";
 const CHAT_MODEL = "openai/gpt-4o-mini";
+const NEGATIVE_BBB_RATINGS = ["F", "D-", "D", "D+", "C-"];
 
 const STOPWORDS = new Set([
   "The",
@@ -44,6 +52,68 @@ function extractKeywordTerms(question: string): string[] {
   const terms = [...numbers, ...properNouns.filter((word) => !STOPWORDS.has(word))];
   return [...new Set(terms)];
 }
+
+// Vector similarity matches similar *phrasing*, not entities satisfying a
+// numeric condition -- confirmed live that "which properties have multiple
+// open permits" returned a confidently wrong "none do" answer even though
+// several properties clearly qualify. These tools give the model a real
+// structured-query path for count/filter-style questions, reusing the same
+// logic the Property/Contractor views already use.
+const tools = {
+  findPropertiesWithMultipleOpenPermits: tool({
+    description:
+      "Finds real properties that currently have more than one open (active) permit. Use this for questions about properties with multiple/several open permits, not vector search, since that requires counting.",
+    inputSchema: z.object({ limit: z.number().min(1).max(20).default(10) }),
+    execute: async ({ limit }) => {
+      const openPermitCounts = db
+        .select({
+          propertyId: propertyImprovements.propertyId,
+          openCount: sql<number>`count(*) filter (where ${propertyImprovements.improvementStatus} = 'open')`.as(
+            "open_count",
+          ),
+        })
+        .from(propertyImprovements)
+        .groupBy(propertyImprovements.propertyId)
+        .as("open_counts");
+
+      const rows = await db
+        .select({
+          propertyId: properties.propertyId,
+          unnormalizedAddress: addresses.unnormalizedAddress,
+          cityName: addresses.cityName,
+          openPermitCount: openPermitCounts.openCount,
+        })
+        .from(properties)
+        .innerJoin(openPermitCounts, eq(openPermitCounts.propertyId, properties.propertyId))
+        .leftJoin(addresses, eq(properties.addressId, addresses.addressId))
+        .where(gt(openPermitCounts.openCount, 1))
+        .orderBy(desc(openPermitCounts.openCount))
+        .limit(limit);
+
+      return rows;
+    },
+  }),
+  findContractorsWithNegativeBbbRating: tool({
+    description:
+      "Finds real contractors with a negative BBB rating (F, D-, D, D+, or C-). Use this for questions about contractors with poor/negative BBB ratings, not vector search, since that requires filtering by an exact rating value.",
+    inputSchema: z.object({ limit: z.number().min(1).max(20).default(10) }),
+    execute: async ({ limit }) => {
+      const rows = await db
+        .select({
+          companyId: companies.companyId,
+          name: companies.name,
+          bbbRating: businessReputationProfiles.bbbRating,
+          reviewCount: businessReputationProfiles.reviewCount,
+        })
+        .from(businessReputationProfiles)
+        .innerJoin(companies, eq(companies.companyId, businessReputationProfiles.companyId))
+        .where(inArray(businessReputationProfiles.bbbRating, NEGATIVE_BBB_RATINGS))
+        .limit(limit);
+
+      return rows;
+    },
+  }),
+};
 
 export const ragRouter = router({
   search: publicProcedure
@@ -98,37 +168,50 @@ export const ragRouter = router({
               .orderBy(sql`${similarity} desc`)
           : [];
 
-      if (matches.length === 0) {
-        return {
-          answer: "No indexed records were found to answer this question yet.",
-          citations: [],
-        };
-      }
+      const context =
+        matches.length > 0
+          ? matches
+              .map(
+                (m, i) =>
+                  `[${i + 1}] (${m.entityType}, source: ${m.sourceSystem}:${m.sourceRecordKey}) ${m.content}`,
+              )
+              .join("\n")
+          : "(no semantically similar records found)";
 
-      const context = matches
-        .map(
-          (m, i) =>
-            `[${i + 1}] (${m.entityType}, source: ${m.sourceSystem}:${m.sourceRecordKey}) ${m.content}`,
-        )
-        .join("\n");
-
-      const { text } = await generateText({
+      const result = await generateText({
         model: CHAT_MODEL,
+        tools,
+        stopWhen: stepCountIs(3),
         system:
-          "You answer questions about Lee County property, permit, contractor, and business data using ONLY the numbered context provided. Cite sources inline using their bracket number, e.g. [1]. If the context doesn't answer the question, say so plainly.",
+          "You answer questions about Lee County property, permit, contractor, and business data. For questions asking to count or filter entities by a condition (e.g. \"properties with multiple open permits\", \"contractors with negative BBB ratings\"), use the available tools to get real, accurate results rather than the numbered context below, which only reflects semantic similarity, not exact counts. For all other questions, answer using ONLY the numbered context provided. Cite sources inline using their bracket number, e.g. [1]. If neither the context nor a tool answers the question, say so plainly.",
         prompt: `Context:\n${context}\n\nQuestion: ${input.question}`,
       });
 
+      const toolCitations = result.toolResults.flatMap((toolResult, stepIndex) => {
+        const rows = Array.isArray(toolResult.output) ? toolResult.output : [];
+        return rows.map((row: { propertyId?: string; companyId?: string }, rowIndex: number) => ({
+          index: matches.length + stepIndex * 100 + rowIndex + 1,
+          entityType: toolResult.toolName === "findPropertiesWithMultipleOpenPermits" ? "property" : "contractor",
+          entityId: row.propertyId ?? row.companyId ?? "unknown",
+          sourceSystem: "structured_query",
+          sourceRecordKey: toolResult.toolName,
+          similarity: null,
+        }));
+      });
+
       return {
-        answer: text,
-        citations: matches.map((m, i) => ({
-          index: i + 1,
-          entityType: m.entityType,
-          entityId: m.entityId,
-          sourceSystem: m.sourceSystem,
-          sourceRecordKey: m.sourceRecordKey,
-          similarity: m.similarity,
-        })),
+        answer: result.text,
+        citations: [
+          ...matches.map((m, i) => ({
+            index: i + 1,
+            entityType: m.entityType,
+            entityId: m.entityId,
+            sourceSystem: m.sourceSystem,
+            sourceRecordKey: m.sourceRecordKey,
+            similarity: m.similarity as number | null,
+          })),
+          ...toolCitations,
+        ],
       };
     }),
 });

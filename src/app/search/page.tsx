@@ -63,7 +63,7 @@ export default function SearchPage() {
                       {c.sourceRecordKey.length > 16 && "…"}
                     </span>
                     <span className="eyebrow">
-                      similarity {c.similarity.toFixed(3)}
+                      {c.similarity !== null ? `similarity ${c.similarity.toFixed(3)}` : "structured query"}
                     </span>
                   </li>
                 ))}
