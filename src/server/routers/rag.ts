@@ -247,6 +247,48 @@ const tools = {
       return rows;
     },
   }),
+  findPropertiesWithCompletedWorkByType: tool({
+    description:
+      "Finds real properties with COMPLETED/CLOSED permit work matching a specific type/category (e.g. roof, electrical, plumbing, concrete), ordered by estimated job value (largest first). Use this for questions about finished, historical, or \"major\" renovation work of a specific type -- e.g. \"major roof replacements\", \"large completed electrical projects\" -- as opposed to findPropertiesWithOpenPermitsByType, which is only for permits that are CURRENTLY OPEN.",
+    inputSchema: z.object({
+      workType: z
+        .string()
+        .describe('The type of work to filter by, e.g. "roof", "electrical", "plumbing", "concrete".'),
+      limit: z.number().min(1).max(20).default(10),
+    }),
+    execute: async ({ workType, limit }) => {
+      const likePattern = `%${workType}%`;
+      // The structured estimated_job_value column is populated on only ~3%
+      // of permits -- the actual dollar figure almost always lives as
+      // scraped free text ("Job Value: 25000") inside improvement_type
+      // instead (same messy-source-text quirk documented in PLAN.md).
+      // Falling back to a text-extracted value is the difference between
+      // this tool ranking by "major" and every row tying at null.
+      const effectiveJobValue = sql<number | null>`coalesce(
+        (substring(${propertyImprovements.improvementType} from 'Job Value: ([0-9]+)'))::numeric,
+        ${propertyImprovements.estimatedJobValue}
+      )`;
+      const rows = await db
+        .select({
+          propertyId: properties.propertyId,
+          unnormalizedAddress: addresses.unnormalizedAddress,
+          cityName: addresses.cityName,
+          improvementType: propertyImprovements.improvementType,
+          estimatedJobValue: effectiveJobValue,
+          completionDate: propertyImprovements.completionDate,
+        })
+        .from(propertyImprovements)
+        .innerJoin(properties, eq(properties.propertyId, propertyImprovements.propertyId))
+        .leftJoin(addresses, eq(properties.addressId, addresses.addressId))
+        .where(
+          sql`${propertyImprovements.improvementStatus} = 'closed' and ${propertyImprovements.improvementType} ilike ${likePattern}`,
+        )
+        .orderBy(sql`${effectiveJobValue} desc nulls last`)
+        .limit(limit);
+
+      return rows;
+    },
+  }),
   findProjectsByNegativeBbbContractors: tool({
     description:
       "Finds real renovation projects completed by contractors who have a negative BBB rating or complaint history. Use this for questions correlating contractor BBB standing with completed project/renovation work, not vector search, since that requires joining BBB ratings to the projects table.",
@@ -339,7 +381,7 @@ export const ragRouter = router({
         tools,
         stopWhen: stepCountIs(3),
         system:
-          "You answer questions about Lee County property, permit, contractor, and business data. For questions asking to count, rank, or filter entities by a condition (e.g. \"properties with multiple open permits\", \"open roofing permits\", \"contractors with negative BBB ratings\", \"most active contractors\", \"owners with multiple properties\", \"businesses across multiple properties\", \"projects by contractors with negative BBB ratings\"), use the available tools to get real, accurate results rather than the numbered context below, which only reflects semantic similarity, not exact counts, types, or rankings. Read each tool's description carefully and pick the one that actually matches the condition asked about -- a question naming a specific permit type/category or work type must use the type-specific tool, never the generic one, even if it doesn't literally say \"multiple\". Never relabel one tool's results as answering a different condition than what it actually filtered on. For all other questions, answer using ONLY the numbered context provided. Cite sources inline using their bracket number, e.g. [1]. If neither the context nor a tool answers the question, say so plainly.",
+          "You answer questions about Lee County property, permit, contractor, and business data. For questions asking to count, rank, or filter entities by a condition (e.g. \"properties with multiple open permits\", \"open roofing permits\", \"contractors with negative BBB ratings\", \"most active contractors\", \"owners with multiple properties\", \"businesses across multiple properties\", \"projects by contractors with negative BBB ratings\", \"major roof replacements\", \"large completed electrical projects\"), use the available tools to get real, accurate results rather than the numbered context below, which only reflects semantic similarity, not exact counts, types, or rankings. Read each tool's description carefully and pick the one that actually matches the condition asked about -- a question naming a specific permit type/category or work type must use the type-specific tool, never the generic one, even if it doesn't literally say \"multiple\"; a question about COMPLETED/historical/\"major\" work of a type must use findPropertiesWithCompletedWorkByType, never findPropertiesWithOpenPermitsByType, which only covers currently-open permits. Never relabel one tool's results as answering a different condition than what it actually filtered on. For all other questions, answer using ONLY the numbered context provided. Cite sources inline using their bracket number, e.g. [1]. If neither the context nor a tool answers the question, say so plainly.",
         prompt: `Context:\n${context}\n\nQuestion: ${input.question}`,
       });
 
@@ -352,6 +394,7 @@ export const ragRouter = router({
         findOwnersWithMultipleProperties: "property",
         findContractorsByWorkType: "contractor",
         findProjectsByNegativeBbbContractors: "contractor",
+        findPropertiesWithCompletedWorkByType: "property",
       };
       // A tool call means the answer was built from real structured-query
       // rows, not the vector-similarity context (the system prompt tells the
