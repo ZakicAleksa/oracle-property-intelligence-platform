@@ -279,13 +279,25 @@ async function buildContractorSummaries(): Promise<void> {
     companyRows.map((r) => [r.companyId, r.name]),
   );
 
+  // Pre-grouped once so the per-company loop below is O(1) lookups instead
+  // of an O(companies x permits) filter/find/some scan -- with the full
+  // county now enriched, companies and permits are both in the tens of
+  // thousands, and the naive per-company scan measurably compounds.
+  const permitsByCompanyId = new Map<string, typeof permitRows>();
+  for (const permit of permitRows) {
+    const bucket = permitsByCompanyId.get(permit.companyId!);
+    if (bucket === undefined) permitsByCompanyId.set(permit.companyId!, [permit]);
+    else bucket.push(permit);
+  }
+  const bbbByCompanyId = new Map(bbbRows.map((r) => [r.companyId!, r]));
+
   // BBB-profiled contractors first — tiny in number (a handful) and the ones
   // Required Demo Inquiries specifically ask about (negative ratings,
   // complaints) — must not get crowded out by the arbitrary bulk of
   // permit-only contractors when the embedding slice is bounded.
   const orderedCompanyIds = [...companyIds].sort((a, b) => {
-    const aHasBbb = bbbRows.some((r) => r.companyId === a) ? 1 : 0;
-    const bHasBbb = bbbRows.some((r) => r.companyId === b) ? 1 : 0;
+    const aHasBbb = bbbByCompanyId.has(a) ? 1 : 0;
+    const bHasBbb = bbbByCompanyId.has(b) ? 1 : 0;
     return bHasBbb - aHasBbb;
   });
 
@@ -296,8 +308,8 @@ async function buildContractorSummaries(): Promise<void> {
   }[] = [];
   for (const companyId of orderedCompanyIds) {
     const name = nameByCompanyId.get(companyId) ?? "Unknown contractor";
-    const permits = permitRows.filter((r) => r.companyId === companyId);
-    const bbb = bbbRows.find((r) => r.companyId === companyId);
+    const permits = permitsByCompanyId.get(companyId) ?? [];
+    const bbb = bbbByCompanyId.get(companyId);
 
     const permitSummary =
       permits.length > 0
