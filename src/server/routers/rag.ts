@@ -390,12 +390,12 @@ export const ragRouter = router({
         prompt: `Context:\n${context}\n\nQuestion: ${input.question}`,
       });
 
-      const TOOL_ENTITY_TYPES: Record<string, "property" | "contractor"> = {
+      const TOOL_ENTITY_TYPES: Record<string, "property" | "contractor" | "business"> = {
         findPropertiesWithMultipleOpenPermits: "property",
         findPropertiesWithOpenPermitsByType: "property",
         findContractorsWithNegativeBbbRating: "contractor",
         findMostActiveContractorsByProjectCount: "contractor",
-        findBusinessesAcrossMultipleProperties: "contractor",
+        findBusinessesAcrossMultipleProperties: "business",
         findOwnersWithMultipleProperties: "property",
         findContractorsByWorkType: "contractor",
         findProjectsByNegativeBbbContractors: "contractor",
