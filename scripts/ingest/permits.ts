@@ -17,6 +17,21 @@ const {
 
 const SOURCE_SYSTEM = "lee_permits";
 
+// Some properties (heavily-scraped permits with dozens of custom fields per
+// sub-permit) produce thousands of child rows. Inserting them in one
+// unchunked multi-row VALUES blows past Postgres's bind-parameter limit /
+// Neon's HTTP driver request-size limit and fails the whole property's load.
+// Chunking keeps every insert well under either limit.
+const INSERT_CHUNK_SIZE = 500;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
 function excluded(column: string) {
   return sql.raw(`excluded.${column}`);
 }
@@ -90,37 +105,39 @@ export async function loadPermitsForProperty(
     estimatedSqFt: toNumericString(permit.estimatedSqFt),
   });
 
-  await db
-    .insert(propertyImprovements)
-    .values(
-      permits.map((permit, index) => ({
-        propertyImprovementId: randomUUID(),
-        propertyId,
-        permitNumber: permit.permitNumber,
-        sourcePayload: permit as unknown as Record<string, unknown>,
-        sourceSystem: SOURCE_SYSTEM,
-        sourceRecordKey: permitSourceKeys[index]!,
-        loadedAt: now,
-        ...improvementSet(permit),
-      })),
-    )
-    .onConflictDoUpdate({
-      target: [
-        propertyImprovements.sourceSystem,
-        propertyImprovements.sourceRecordKey,
-      ],
-      set: {
-        improvementType: excluded("improvement_type"),
-        improvementStatus: excluded("improvement_status"),
-        recordStatus: excluded("record_status"),
-        projectDescription: excluded("project_description"),
-        completionDate: excluded("completion_date"),
-        estimatedJobValue: excluded("estimated_job_value"),
-        estimatedSqFt: excluded("estimated_sq_ft"),
-        loadedAt: excluded("loaded_at"),
-        updatedAt: now,
-      },
-    });
+  const improvementRows = permits.map((permit, index) => ({
+    propertyImprovementId: randomUUID(),
+    propertyId,
+    permitNumber: permit.permitNumber,
+    sourcePayload: permit as unknown as Record<string, unknown>,
+    sourceSystem: SOURCE_SYSTEM,
+    sourceRecordKey: permitSourceKeys[index]!,
+    loadedAt: now,
+    ...improvementSet(permit),
+  }));
+
+  for (const rows of chunk(improvementRows, INSERT_CHUNK_SIZE)) {
+    await db
+      .insert(propertyImprovements)
+      .values(rows)
+      .onConflictDoUpdate({
+        target: [
+          propertyImprovements.sourceSystem,
+          propertyImprovements.sourceRecordKey,
+        ],
+        set: {
+          improvementType: excluded("improvement_type"),
+          improvementStatus: excluded("improvement_status"),
+          recordStatus: excluded("record_status"),
+          projectDescription: excluded("project_description"),
+          completionDate: excluded("completion_date"),
+          estimatedJobValue: excluded("estimated_job_value"),
+          estimatedSqFt: excluded("estimated_sq_ft"),
+          loadedAt: excluded("loaded_at"),
+          updatedAt: now,
+        },
+      });
+  }
 
   const idRows = await db
     .select({
@@ -239,42 +256,42 @@ export async function loadPermitsForProperty(
     }
   }
 
-  if (contactRows.length > 0) {
+  for (const rows of chunk(contactRows, INSERT_CHUNK_SIZE)) {
     await db
       .insert(permitContacts)
-      .values(contactRows)
+      .values(rows)
       .onConflictDoNothing({
         target: [permitContacts.sourceSystem, permitContacts.sourceRecordKey],
       });
   }
-  if (eventRows.length > 0) {
+  for (const rows of chunk(eventRows, INSERT_CHUNK_SIZE)) {
     await db
       .insert(permitEvents)
-      .values(eventRows)
+      .values(rows)
       .onConflictDoNothing({
         target: [permitEvents.sourceSystem, permitEvents.sourceRecordKey],
       });
   }
-  if (feeRows.length > 0) {
+  for (const rows of chunk(feeRows, INSERT_CHUNK_SIZE)) {
     await db
       .insert(permitFees)
-      .values(feeRows)
+      .values(rows)
       .onConflictDoNothing({
         target: [permitFees.sourceSystem, permitFees.sourceRecordKey],
       });
   }
-  if (linkRows.length > 0) {
+  for (const rows of chunk(linkRows, INSERT_CHUNK_SIZE)) {
     await db
       .insert(permitLinks)
-      .values(linkRows)
+      .values(rows)
       .onConflictDoNothing({
         target: [permitLinks.sourceSystem, permitLinks.sourceRecordKey],
       });
   }
-  if (fieldRows.length > 0) {
+  for (const rows of chunk(fieldRows, INSERT_CHUNK_SIZE)) {
     await db
       .insert(permitCustomFields)
-      .values(fieldRows)
+      .values(rows)
       .onConflictDoNothing({
         target: [
           permitCustomFields.sourceSystem,
@@ -295,17 +312,19 @@ export async function loadPermitsForProperty(
       );
   }
 
-  await db
-    .insert(publicRecords)
-    .values(
-      permitSourceKeys.map((key) => ({
-        documentType: "permit_filing" as const,
-        sourceSystem: SOURCE_SYSTEM,
-        sourceRecordKey: key,
-        loadedAt: now,
-      })),
-    )
-    .onConflictDoNothing({
-      target: [publicRecords.sourceSystem, publicRecords.sourceRecordKey],
-    });
+  const publicRecordRows = permitSourceKeys.map((key) => ({
+    documentType: "permit_filing" as const,
+    sourceSystem: SOURCE_SYSTEM,
+    sourceRecordKey: key,
+    loadedAt: now,
+  }));
+
+  for (const rows of chunk(publicRecordRows, INSERT_CHUNK_SIZE)) {
+    await db
+      .insert(publicRecords)
+      .values(rows)
+      .onConflictDoNothing({
+        target: [publicRecords.sourceSystem, publicRecords.sourceRecordKey],
+      });
+  }
 }

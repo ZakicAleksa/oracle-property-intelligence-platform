@@ -137,7 +137,7 @@ export type ConsolidatedProperty = {
 export async function fetchConsolidatedProperty(
   cid: string,
 ): Promise<ConsolidatedProperty> {
-  const response = await fetch(`https://ipfs.filebase.io/ipfs/${cid}`);
+  const response = await fetch(`https://ipfs.io/ipfs/${cid}`);
   if (!response.ok) {
     throw new Error(
       `Failed to fetch property CID ${cid}: HTTP ${response.status}`,
