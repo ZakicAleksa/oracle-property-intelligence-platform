@@ -50,6 +50,33 @@ describe("parseContactRawName", () => {
     expect(result.licenseNumber).toBe("CGC013106");
   });
 
+  it("cuts the name at a street-number address with a unit-letter suffix", () => {
+    // Confirmed live: plain \d{1,6} missed "2212A" and "16911-B" because a
+    // letter (optionally hyphenated) directly follows the digits with no
+    // space, so real company names were leaking the full street address.
+    expect(
+      parseContactRawName(
+        "LEWIS MORRIS LEWIS MORRIS AIR CONDITIONING INC 2212A ANDREA LANE FORT MYERS, FL",
+      ).cleanedName,
+    ).toBe("LEWIS MORRIS LEWIS MORRIS AIR CONDITIONING INC");
+    expect(
+      parseContactRawName(
+        "WILLIAM CRANE RICE WINDOWS AND DOORS 16911-B GATOR RD FORT MYERS, FL",
+      ).cleanedName,
+    ).toBe("WILLIAM CRANE RICE WINDOWS AND DOORS");
+  });
+
+  it("strips an embedded long digit-run record ID that isn't an address or a license number", () => {
+    // Confirmed live: some raw strings embed an unlabeled ~18-digit
+    // tracking ID mid-string, e.g. between the applicant's name and the
+    // company name, which no other pattern catches.
+    expect(
+      parseContactRawName(
+        "JEFFREY HOOKER SR 201506291544599790 HOOKER MARINE CONSTRUCTION PLLC",
+      ).cleanedName,
+    ).toBe("JEFFREY HOOKER SR HOOKER MARINE CONSTRUCTION PLLC");
+  });
+
   it("produces the same cleaned name regardless of person/company word order", () => {
     // Confirmed live: the same real contractor's "Applicant" and "Licensed
     // Professional" contact rows list person-name and company-name in a

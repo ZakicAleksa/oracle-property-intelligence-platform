@@ -27,9 +27,19 @@ const PHONE_PATTERN = /(?:Phone|Cell Phone|Alternate Phone|Fax):\s*(\d{10})/i;
 const LICENSE_PATTERN = /\b([A-Z]{2,3}\d{6,9})\b/;
 const EMAIL_PATTERN = /[\w.-]+@[\w.-]+\.\w+/;
 // Marks where the street-address portion begins: a leading street number
-// ("7253 Gasparilla Rd"), or a PO Box. Cut here — everything from this point
-// on is address/phone/license noise, not part of the name.
-const ADDRESS_START_PATTERN = /\b(?:\d{1,6}\s+\S|P\.?\s?O\.?\s*BOX\s*\d+)/i;
+// ("7253 Gasparilla Rd"), optionally with a unit-letter suffix ("2212A
+// Andrea Lane", "16911-B Gator Rd" -- confirmed live: the plain \d{1,6}
+// version missed both of these, leaving the address glued onto the
+// company name), or a PO Box. Cut here — everything from this point on is
+// address/phone/license noise, not part of the name.
+const ADDRESS_START_PATTERN =
+  /\b(?:\d{1,6}-?[A-Z]?\s+\S|P\.?\s?O\.?\s*BOX\s*\d+)/i;
+// Some raw strings embed a long internal record/tracking ID with no
+// surrounding label (e.g. "JEFFREY HOOKER SR 201506291544599790 HOOKER
+// MARINE CONSTRUCTION PLLC") -- confirmed live, not an address and not
+// caught by any pattern above. Real company names don't contain bare
+// 9+ digit runs, so stripping them is safe.
+const LONG_DIGIT_RUN_PATTERN = /\b\d{9,}\b/g;
 
 export type ParsedContact = {
   cleanedName: string | null;
@@ -53,6 +63,7 @@ export function parseContactRawName(rawName: string | null): ParsedContact {
   if (license !== null) cleaned = cleaned.replace(license, "");
   cleaned = cleaned
     .replace(/(?:Primary |Cell |Alternate )?Phone:\s*\d{10}/gi, "")
+    .replace(LONG_DIGIT_RUN_PATTERN, "")
     .replace(/,\s*$/, "")
     .replace(/\s{2,}/g, " ")
     .trim();
