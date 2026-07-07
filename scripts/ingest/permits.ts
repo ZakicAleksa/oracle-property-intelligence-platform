@@ -24,7 +24,7 @@ const SOURCE_SYSTEM = "lee_permits";
 // Chunking keeps every insert well under either limit.
 const INSERT_CHUNK_SIZE = 500;
 
-function chunk<T>(items: T[], size: number): T[][] {
+export function chunk<T>(items: T[], size: number): T[][] {
   const chunks: T[][] = [];
   for (let i = 0; i < items.length; i += size) {
     chunks.push(items.slice(i, i + size));
@@ -53,7 +53,7 @@ function toNumericString(value: string | number | null): string | null {
 }
 
 /** Derive a semantic open/closed status from Oracle's raw recordStatus text. */
-function deriveImprovementStatus(recordStatus: string | null): string | null {
+export function deriveImprovementStatus(recordStatus: string | null): string | null {
   if (recordStatus === null) return null;
   const normalized = recordStatus.toLowerCase();
   if (
