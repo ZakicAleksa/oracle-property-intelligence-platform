@@ -54,6 +54,7 @@ function parseArgs(): {
   file: string;
   limit: number | undefined;
   idsFile: string | undefined;
+  additiveOnly: boolean;
 } {
   const args = Object.fromEntries(
     process.argv.slice(2).map((arg) => {
@@ -64,7 +65,7 @@ function parseArgs(): {
 
   if (args.file === undefined) {
     throw new Error(
-      "Usage: npx tsx scripts/ingest/backbone.ts --file=<path> [--limit=N] [--ids-file=<path>]",
+      "Usage: npx tsx scripts/ingest/backbone.ts --file=<path> [--limit=N] [--ids-file=<path>] [--additive-only]",
     );
   }
 
@@ -72,6 +73,7 @@ function parseArgs(): {
     file: args.file,
     limit: args.limit === undefined ? undefined : Number(args.limit),
     idsFile: args["ids-file"],
+    additiveOnly: "additive-only" in args,
   };
 }
 
@@ -105,8 +107,12 @@ async function lookupParcelIds(
   return new Map(rows.map((row) => [row.key, row.id]));
 }
 
-async function loadBatch(batch: ParquetRow[], now: Date): Promise<void> {
-  await db
+async function loadBatch(
+  batch: ParquetRow[],
+  now: Date,
+  additiveOnly: boolean,
+): Promise<void> {
+  const addressInsert = db
     .insert(addresses)
     .values(
       batch.map((row) => {
@@ -137,28 +143,32 @@ async function loadBatch(batch: ParquetRow[], now: Date): Promise<void> {
           loadedAt: now,
         };
       }),
-    )
-    .onConflictDoUpdate({
-      target: [addresses.sourceSystem, addresses.sourceRecordKey],
-      set: {
-        cityName: excluded("city_name"),
-        stateCode: excluded("state_code"),
-        postalCode: excluded("postal_code"),
-        latitude: excluded("latitude"),
-        longitude: excluded("longitude"),
-        unnormalizedAddress: excluded("unnormalized_address"),
-        streetNumber: excluded("street_number"),
-        streetPreDirectionalText: excluded("street_pre_directional_text"),
-        streetName: excluded("street_name"),
-        streetSuffixType: excluded("street_suffix_type"),
-        streetPostDirectionalText: excluded("street_post_directional_text"),
-        unitIdentifier: excluded("unit_identifier"),
-        normalizedAddressKey: excluded("normalized_address_key"),
-        normalizedAddressHash: excluded("normalized_address_hash"),
-        loadedAt: excluded("loaded_at"),
-        updatedAt: now,
-      },
-    });
+    );
+  await (additiveOnly
+    ? addressInsert.onConflictDoNothing({
+        target: [addresses.sourceSystem, addresses.sourceRecordKey],
+      })
+    : addressInsert.onConflictDoUpdate({
+        target: [addresses.sourceSystem, addresses.sourceRecordKey],
+        set: {
+          cityName: excluded("city_name"),
+          stateCode: excluded("state_code"),
+          postalCode: excluded("postal_code"),
+          latitude: excluded("latitude"),
+          longitude: excluded("longitude"),
+          unnormalizedAddress: excluded("unnormalized_address"),
+          streetNumber: excluded("street_number"),
+          streetPreDirectionalText: excluded("street_pre_directional_text"),
+          streetName: excluded("street_name"),
+          streetSuffixType: excluded("street_suffix_type"),
+          streetPostDirectionalText: excluded("street_post_directional_text"),
+          unitIdentifier: excluded("unit_identifier"),
+          normalizedAddressKey: excluded("normalized_address_key"),
+          normalizedAddressHash: excluded("normalized_address_hash"),
+          loadedAt: excluded("loaded_at"),
+          updatedAt: now,
+        },
+      }));
 
   // Multiple properties can share one parcel (e.g. multiple units/buildings on
   // the same parcel), so dedupe by parcel_identifier before inserting — a
@@ -167,7 +177,7 @@ async function loadBatch(batch: ParquetRow[], now: Date): Promise<void> {
     ...new Map(batch.map((row) => [row.parcel_identifier, row])).values(),
   ];
 
-  await db
+  const parcelInsert = db
     .insert(parcels)
     .values(
       uniqueParcelRows.map((row) => ({
@@ -180,17 +190,21 @@ async function loadBatch(batch: ParquetRow[], now: Date): Promise<void> {
         sourceRecordKey: row.parcel_identifier,
         loadedAt: now,
       })),
-    )
-    .onConflictDoUpdate({
-      target: [parcels.sourceSystem, parcels.sourceRecordKey],
-      set: {
-        countyName: excluded("county_name"),
-        stateCode: excluded("state_code"),
-        jurisdictionKey: excluded("jurisdiction_key"),
-        loadedAt: excluded("loaded_at"),
-        updatedAt: now,
-      },
-    });
+    );
+  await (additiveOnly
+    ? parcelInsert.onConflictDoNothing({
+        target: [parcels.sourceSystem, parcels.sourceRecordKey],
+      })
+    : parcelInsert.onConflictDoUpdate({
+        target: [parcels.sourceSystem, parcels.sourceRecordKey],
+        set: {
+          countyName: excluded("county_name"),
+          stateCode: excluded("state_code"),
+          jurisdictionKey: excluded("jurisdiction_key"),
+          loadedAt: excluded("loaded_at"),
+          updatedAt: now,
+        },
+      }));
 
   // Re-read the ids we just wrote (rather than trusting the UUIDs generated
   // above), since a re-run hits onConflictDoUpdate and keeps each row's
@@ -202,7 +216,7 @@ async function loadBatch(batch: ParquetRow[], now: Date): Promise<void> {
     batch.map((row) => row.parcel_identifier),
   );
 
-  await db
+  const propertyInsert = db
     .insert(properties)
     .values(
       batch.map((row) => ({
@@ -221,22 +235,24 @@ async function loadBatch(batch: ParquetRow[], now: Date): Promise<void> {
         sourceRecordKey: row.property_id,
         loadedAt: now,
       })),
-    )
-    .onConflictDoUpdate({
-      target: [properties.propertyId],
-      set: {
-        parcelId: excluded("parcel_id"),
-        addressId: excluded("address_id"),
-        propertyType: excluded("property_type"),
-        propertyUsageType: excluded("property_usage_type"),
-        propertyStructureBuiltYear: excluded("property_structure_built_year"),
-        livableFloorArea: excluded("livable_floor_area"),
-        totalArea: excluded("total_area"),
-        subdivision: excluded("subdivision"),
-        loadedAt: excluded("loaded_at"),
-        updatedAt: now,
-      },
-    });
+    );
+  await (additiveOnly
+    ? propertyInsert.onConflictDoNothing({ target: [properties.propertyId] })
+    : propertyInsert.onConflictDoUpdate({
+        target: [properties.propertyId],
+        set: {
+          parcelId: excluded("parcel_id"),
+          addressId: excluded("address_id"),
+          propertyType: excluded("property_type"),
+          propertyUsageType: excluded("property_usage_type"),
+          propertyStructureBuiltYear: excluded("property_structure_built_year"),
+          livableFloorArea: excluded("livable_floor_area"),
+          totalArea: excluded("total_area"),
+          subdivision: excluded("subdivision"),
+          loadedAt: excluded("loaded_at"),
+          updatedAt: now,
+        },
+      }));
 
   const ownershipRows = batch
     .filter((row) => row.owner_name !== null)
@@ -249,17 +265,19 @@ async function loadBatch(batch: ParquetRow[], now: Date): Promise<void> {
     }));
 
   if (ownershipRows.length > 0) {
-    await db
-      .insert(ownerships)
-      .values(ownershipRows)
-      .onConflictDoUpdate({
-        target: [ownerships.sourceSystem, ownerships.sourceRecordKey],
-        set: {
-          ownedBy: excluded("owned_by"),
-          loadedAt: excluded("loaded_at"),
-          updatedAt: now,
-        },
-      });
+    const ownershipInsert = db.insert(ownerships).values(ownershipRows);
+    await (additiveOnly
+      ? ownershipInsert.onConflictDoNothing({
+          target: [ownerships.sourceSystem, ownerships.sourceRecordKey],
+        })
+      : ownershipInsert.onConflictDoUpdate({
+          target: [ownerships.sourceSystem, ownerships.sourceRecordKey],
+          set: {
+            ownedBy: excluded("owned_by"),
+            loadedAt: excluded("loaded_at"),
+            updatedAt: now,
+          },
+        }));
   }
 
   const saleRows = batch
@@ -274,42 +292,46 @@ async function loadBatch(batch: ParquetRow[], now: Date): Promise<void> {
     .filter((row) => row.ownershipTransferDate !== null);
 
   if (saleRows.length > 0) {
-    await db
-      .insert(salesHistories)
-      .values(saleRows)
-      .onConflictDoUpdate({
-        target: [salesHistories.sourceSystem, salesHistories.sourceRecordKey],
-        set: {
-          ownershipTransferDate: excluded("ownership_transfer_date"),
-          purchasePriceAmount: excluded("purchase_price_amount"),
-          loadedAt: excluded("loaded_at"),
-          updatedAt: now,
-        },
-      });
+    const saleInsert = db.insert(salesHistories).values(saleRows);
+    await (additiveOnly
+      ? saleInsert.onConflictDoNothing({
+          target: [salesHistories.sourceSystem, salesHistories.sourceRecordKey],
+        })
+      : saleInsert.onConflictDoUpdate({
+          target: [salesHistories.sourceSystem, salesHistories.sourceRecordKey],
+          set: {
+            ownershipTransferDate: excluded("ownership_transfer_date"),
+            purchasePriceAmount: excluded("purchase_price_amount"),
+            loadedAt: excluded("loaded_at"),
+            updatedAt: now,
+          },
+        }));
   }
 
-  await db
-    .insert(publicRecords)
-    .values(
-      batch.map((row) => ({
-        documentType: "appraisal_record" as const,
-        sourceSystem: SOURCE_SYSTEM,
-        sourceRecordKey: row.property_id,
-        sourceArtifactUri: `ipfs://${row.property_cid}`,
-        loadedAt: now,
-      })),
-    )
-    .onConflictDoUpdate({
-      target: [publicRecords.sourceSystem, publicRecords.sourceRecordKey],
-      set: {
-        sourceArtifactUri: excluded("source_artifact_uri"),
-        loadedAt: excluded("loaded_at"),
-      },
-    });
+  const publicRecordInsert = db.insert(publicRecords).values(
+    batch.map((row) => ({
+      documentType: "appraisal_record" as const,
+      sourceSystem: SOURCE_SYSTEM,
+      sourceRecordKey: row.property_id,
+      sourceArtifactUri: `ipfs://${row.property_cid}`,
+      loadedAt: now,
+    })),
+  );
+  await (additiveOnly
+    ? publicRecordInsert.onConflictDoNothing({
+        target: [publicRecords.sourceSystem, publicRecords.sourceRecordKey],
+      })
+    : publicRecordInsert.onConflictDoUpdate({
+        target: [publicRecords.sourceSystem, publicRecords.sourceRecordKey],
+        set: {
+          sourceArtifactUri: excluded("source_artifact_uri"),
+          loadedAt: excluded("loaded_at"),
+        },
+      }));
 }
 
 async function main(): Promise<void> {
-  const { file, limit, idsFile } = parseArgs();
+  const { file, limit, idsFile, additiveOnly } = parseArgs();
 
   console.log(`Reading Parquet file: ${file}`);
   const buffer = await asyncBufferFromFile(file);
@@ -334,7 +356,7 @@ async function main(): Promise<void> {
 
   for (let start = 0; start < selected.length; start += BATCH_SIZE) {
     const batch = selected.slice(start, start + BATCH_SIZE);
-    await loadBatch(batch, now);
+    await loadBatch(batch, now, additiveOnly);
     console.log(
       `Processed ${Math.min(start + BATCH_SIZE, selected.length)} / ${selected.length} properties`,
     );
