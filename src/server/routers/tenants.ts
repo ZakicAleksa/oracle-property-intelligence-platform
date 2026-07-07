@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { db, schema } from "../db";
+import { cleanImprovementTypeLabel } from "../format";
 import { publicProcedure, router } from "../trpc";
 
 const {
@@ -71,6 +72,10 @@ export const tenantsRouter = router({
         })
         .from(propertyImprovements)
         .where(eq(propertyImprovements.propertyId, tenant.propertyId));
+      const cleanedPermits = permits.map((permit) => ({
+        ...permit,
+        improvementType: cleanImprovementTypeLabel(permit.improvementType),
+      }));
 
       const projectList = await db
         .select({
@@ -80,6 +85,6 @@ export const tenantsRouter = router({
         .from(projects)
         .where(eq(projects.propertyId, tenant.propertyId));
 
-      return { tenant, permits, projects: projectList };
+      return { tenant, permits: cleanedPermits, projects: projectList };
     }),
 });

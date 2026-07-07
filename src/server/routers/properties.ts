@@ -2,6 +2,7 @@ import { and, desc, eq, ilike, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db, schema } from "../db";
+import { cleanImprovementTypeLabel } from "../format";
 import { publicProcedure, router } from "../trpc";
 
 const {
@@ -81,7 +82,10 @@ export const propertiesRouter = router({
         .orderBy(desc(openPermitCounts.openCount))
         .limit(input.limit);
 
-      return rows;
+      return rows.map((row) => ({
+        ...row,
+        permitTypes: (row.permitTypes ?? []).map(cleanImprovementTypeLabel),
+      }));
     }),
 
   detail: publicProcedure
@@ -129,6 +133,10 @@ export const propertiesRouter = router({
           eq(companies.companyId, propertyImprovements.contractorCompanyId),
         )
         .where(eq(propertyImprovements.propertyId, input.propertyId));
+      const cleanedPermits = permits.map((permit) => ({
+        ...permit,
+        improvementType: cleanImprovementTypeLabel(permit.improvementType),
+      }));
 
       const occupancy = await db
         .select({
@@ -162,7 +170,7 @@ export const propertiesRouter = router({
       return {
         property,
         ownershipHistory,
-        permits,
+        permits: cleanedPermits,
         occupancy,
         projects: projectList,
       };
