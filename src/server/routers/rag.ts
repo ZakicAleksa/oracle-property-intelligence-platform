@@ -268,14 +268,18 @@ const tools = {
         (substring(${propertyImprovements.improvementType} from 'Job Value: ([0-9]+)'))::numeric,
         ${propertyImprovements.estimatedJobValue}
       )`;
+      // Some properties (mobile home parks, multi-unit sites) have dozens of
+      // distinct permits of the same type -- without grouping, a single
+      // property can occupy several slots in a top-N ranked list, which
+      // reads as duplicate rows. Group by property and surface only its
+      // single largest matching job.
+      const maxJobValue = sql<number | null>`max(${effectiveJobValue})`;
       const rows = await db
         .select({
           propertyId: properties.propertyId,
           unnormalizedAddress: addresses.unnormalizedAddress,
           cityName: addresses.cityName,
-          improvementType: propertyImprovements.improvementType,
-          estimatedJobValue: effectiveJobValue,
-          completionDate: propertyImprovements.completionDate,
+          estimatedJobValue: maxJobValue,
         })
         .from(propertyImprovements)
         .innerJoin(properties, eq(properties.propertyId, propertyImprovements.propertyId))
@@ -283,7 +287,8 @@ const tools = {
         .where(
           sql`${propertyImprovements.improvementStatus} = 'closed' and ${propertyImprovements.improvementType} ilike ${likePattern}`,
         )
-        .orderBy(sql`${effectiveJobValue} desc nulls last`)
+        .groupBy(properties.propertyId, addresses.unnormalizedAddress, addresses.cityName)
+        .orderBy(sql`${maxJobValue} desc nulls last`)
         .limit(limit);
 
       return rows;
