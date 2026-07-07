@@ -17,7 +17,7 @@
 // fuzzy/NLP name matching, out of scope for this pass. Revisit if
 // fragmentation turns out to hurt the Contractor View.
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 
 import { db, schema } from "./db.js";
 
@@ -129,4 +129,87 @@ export async function resolveCompanyId(
   const finalId = resolved[0]?.companyId ?? companyId;
   companyIdCache.set(matchKey, finalId);
   return finalId;
+}
+
+/**
+ * Batched form of resolveCompanyId: resolves many names in a fixed 2-3 DB
+ * round trips total instead of one round trip per name. A single property
+ * can have hundreds of permit contacts (confirmed live: a mobile-home-park
+ * property took 16+ seconds to resolve 408 contacts one at a time before
+ * this existed) -- this is the same find-or-create logic, just batched.
+ * Returns a map from each input name to its resolved companyId.
+ */
+export async function resolveCompanyIds(
+  cleanedNames: string[],
+  sourceSystem: string,
+  now: Date,
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  const namesByMatchKey = new Map<string, string[]>();
+  const uncachedMatchKeys: string[] = [];
+
+  for (const name of new Set(cleanedNames)) {
+    const matchKey = computeMatchKey(name);
+    const cached = companyIdCache.get(matchKey);
+    if (cached !== undefined) {
+      result.set(name, cached);
+      continue;
+    }
+    if (!namesByMatchKey.has(matchKey)) {
+      namesByMatchKey.set(matchKey, []);
+      uncachedMatchKeys.push(matchKey);
+    }
+    namesByMatchKey.get(matchKey)!.push(name);
+  }
+
+  if (uncachedMatchKeys.length === 0) return result;
+
+  const applyFound = (
+    rows: { companyId: string; normalizedName: string | null }[],
+  ) => {
+    const found = new Set<string>();
+    for (const row of rows) {
+      if (row.normalizedName === null) continue;
+      found.add(row.normalizedName);
+      companyIdCache.set(row.normalizedName, row.companyId);
+      for (const name of namesByMatchKey.get(row.normalizedName) ?? []) {
+        result.set(name, row.companyId);
+      }
+    }
+    return found;
+  };
+
+  const existing = await db
+    .select({ companyId: companies.companyId, normalizedName: companies.normalizedName })
+    .from(companies)
+    .where(inArray(companies.normalizedName, uncachedMatchKeys));
+  const foundMatchKeys = applyFound(existing);
+
+  const missingMatchKeys = uncachedMatchKeys.filter((key) => !foundMatchKeys.has(key));
+  if (missingMatchKeys.length > 0) {
+    await db
+      .insert(companies)
+      .values(
+        missingMatchKeys.map((matchKey) => ({
+          companyId: randomUUID(),
+          name: namesByMatchKey.get(matchKey)![0]!,
+          normalizedName: matchKey,
+          sourceSystem,
+          sourceRecordKey: matchKey,
+          loadedAt: now,
+        })),
+      )
+      .onConflictDoNothing({
+        target: [companies.sourceSystem, companies.sourceRecordKey],
+      });
+
+    // Re-select in case a concurrent insert (or onConflictDoNothing) won the race.
+    const resolved = await db
+      .select({ companyId: companies.companyId, normalizedName: companies.normalizedName })
+      .from(companies)
+      .where(inArray(companies.normalizedName, missingMatchKeys));
+    applyFound(resolved);
+  }
+
+  return result;
 }

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { eq, inArray, sql } from "drizzle-orm";
+import { inArray, sql } from "drizzle-orm";
 
-import { parseContactRawName, resolveCompanyId } from "./contractor.js";
+import { parseContactRawName, resolveCompanyIds } from "./contractor.js";
 import { db, schema } from "./db.js";
 import type { Permit } from "./fetch-property.js";
 
@@ -160,6 +160,24 @@ export async function loadPermitsForProperty(
     companyId: string;
   }[] = [];
 
+  // Parse every contact up front and resolve all contractor names in one
+  // batched call, rather than one DB round trip per contact -- a single
+  // permit-heavy property (e.g. a mobile home park) can have hundreds of
+  // contacts, and resolving them one at a time measured at 16+ seconds for
+  // one property alone before this existed.
+  const parsedContactsByPermit = permits.map((permit) =>
+    permit.contacts.map((contact) => parseContactRawName(contact.rawName)),
+  );
+  const allCleanedNames = parsedContactsByPermit
+    .flat()
+    .map((parsed) => parsed.cleanedName)
+    .filter((name): name is string => name !== null);
+  const companyIdByName = await resolveCompanyIds(
+    allCleanedNames,
+    SOURCE_SYSTEM,
+    now,
+  );
+
   for (const [index, permit] of permits.entries()) {
     const permitSourceKey = permitSourceKeys[index]!;
     const propertyImprovementId =
@@ -169,14 +187,10 @@ export async function loadPermitsForProperty(
     let primaryContractorCompanyId: string | null = null;
 
     for (const [contactIndex, contact] of permit.contacts.entries()) {
-      const parsed = parseContactRawName(contact.rawName);
+      const parsed = parsedContactsByPermit[index]![contactIndex]!;
       let companyId: string | null = null;
       if (parsed.cleanedName !== null) {
-        companyId = await resolveCompanyId(
-          parsed.cleanedName,
-          SOURCE_SYSTEM,
-          now,
-        );
+        companyId = companyIdByName.get(parsed.cleanedName) ?? null;
         if (primaryContractorCompanyId === null)
           primaryContractorCompanyId = companyId;
       }
@@ -300,16 +314,23 @@ export async function loadPermitsForProperty(
       });
   }
 
-  for (const update of contractorUpdates) {
-    await db
-      .update(propertyImprovements)
-      .set({ contractorCompanyId: update.companyId })
-      .where(
-        eq(
-          propertyImprovements.propertyImprovementId,
-          update.propertyImprovementId,
-        ),
-      );
+  // One statement for all updates instead of one round trip per permit --
+  // a permit-heavy property can have hundreds, and each round trip to
+  // Neon's HTTP driver adds real latency (see resolveCompanyIds above).
+  if (contractorUpdates.length > 0) {
+    const valuesList = sql.join(
+      contractorUpdates.map(
+        (update) =>
+          sql`(${update.propertyImprovementId}::uuid, ${update.companyId}::uuid)`,
+      ),
+      sql`, `,
+    );
+    await db.execute(sql`
+      update property_improvements as pi
+      set contractor_company_id = v.company_id
+      from (values ${valuesList}) as v(property_improvement_id, company_id)
+      where pi.property_improvement_id = v.property_improvement_id
+    `);
   }
 
   const publicRecordRows = permitSourceKeys.map((key) => ({
