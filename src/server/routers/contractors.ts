@@ -1,4 +1,4 @@
-import { and, eq, ilike, sql } from "drizzle-orm";
+import { and, eq, ilike, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db, schema } from "../db";
@@ -29,7 +29,10 @@ export const contractorsRouter = router({
       }),
     )
     .query(async ({ input }) => {
-      const permitCounts = db
+      const projectTypeLikePattern =
+        input.projectType !== undefined ? `%${input.projectType}%` : undefined;
+
+      const permitCountsQuery = db
         .select({
           companyId: propertyImprovements.contractorCompanyId,
           permitCount: sql<number>`count(*)`.as("permit_count"),
@@ -41,8 +44,19 @@ export const contractorsRouter = router({
         })
         .from(propertyImprovements)
         .where(sql`${propertyImprovements.contractorCompanyId} IS NOT NULL`)
-        .groupBy(propertyImprovements.contractorCompanyId)
-        .as("permit_counts");
+        .groupBy(propertyImprovements.contractorCompanyId);
+      // Filtering by permit type has to happen in the DB (via HAVING on the
+      // aggregated types array) rather than after fetching every row into
+      // Node -- with the full county now enriched, "every matching
+      // contractor" can be tens of thousands of rows just to then throw
+      // most of them away in JS.
+      const permitCounts = (
+        projectTypeLikePattern !== undefined
+          ? permitCountsQuery.having(
+              sql`bool_or(${propertyImprovements.improvementType} ilike ${projectTypeLikePattern})`,
+            )
+          : permitCountsQuery
+      ).as("permit_counts");
 
       // Oracle's own businessReputationProfiles.complaintCount summary field
       // is frequently null even when real complaint records were scraped --
@@ -85,10 +99,18 @@ export const contractorsRouter = router({
             input.name !== undefined && input.name.length > 0
               ? ilike(companies.name, `%${input.name}%`)
               : undefined,
-            // A contractor is only relevant here if it has permit history or a
-            // BBB profile — excludes bare Sunbiz-only company rows that never
-            // resolved to either signal.
-            sql`(${permitCounts.companyId} IS NOT NULL OR ${businessReputationProfiles.companyId} IS NOT NULL)`,
+            // A contractor is only relevant here if it has permit history or
+            // a BBB profile -- excludes bare Sunbiz-only company rows that
+            // never resolved to either signal. When projectType is set, only
+            // permits can satisfy it (permitCounts is already HAVING-filtered
+            // above), so a BBB-only company can't qualify on that condition
+            // alone -- matches the original in-JS filter's behavior.
+            projectTypeLikePattern !== undefined
+              ? sql`${permitCounts.companyId} IS NOT NULL`
+              : sql`(${permitCounts.companyId} IS NOT NULL OR ${businessReputationProfiles.companyId} IS NOT NULL)`,
+            input.onlyNegativeBbb === true
+              ? inArray(businessReputationProfiles.bbbRating, NEGATIVE_BBB_RATINGS)
+              : undefined,
           ),
         )
         // BBB-linked contractors first (they're almost all permit-count NULL
@@ -100,28 +122,10 @@ export const contractorsRouter = router({
         // not something gated behind the negative-rating filter.
         .orderBy(
           sql`(CASE WHEN ${businessReputationProfiles.companyId} IS NOT NULL THEN 0 ELSE 1 END), ${permitCounts.permitCount} DESC NULLS LAST`,
-        );
+        )
+        .limit(input.limit);
 
-      const filtered = rows.filter((r) => {
-        const permitTypes = r.permitTypes ?? [];
-        if (
-          input.projectType !== undefined &&
-          !permitTypes.some((t) =>
-            t?.toLowerCase().includes(input.projectType!.toLowerCase()),
-          )
-        ) {
-          return false;
-        }
-        if (
-          input.onlyNegativeBbb === true &&
-          !(r.bbbRating !== null && NEGATIVE_BBB_RATINGS.includes(r.bbbRating))
-        ) {
-          return false;
-        }
-        return true;
-      });
-
-      return filtered.slice(0, input.limit).map((row) => ({
+      return rows.map((row) => ({
         ...row,
         permitTypes: (row.permitTypes ?? []).map(cleanImprovementTypeLabel),
       }));
