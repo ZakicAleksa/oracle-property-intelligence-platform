@@ -31,6 +31,14 @@ const TABLES = [
   "permit_links",
   "permit_custom_fields",
   "companies",
+  "tenants",
+  "business_reputation_profiles",
+  "business_reputation_reviews",
+  "business_reputation_complaints",
+  "contractor_quality_scores",
+  "business_registrations",
+  "business_registration_addresses",
+  "business_registration_parties",
 ] as const;
 
 async function main(): Promise<void> {
